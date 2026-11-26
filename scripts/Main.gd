@@ -570,15 +570,11 @@ func _build_colony_ui() -> void:
 	randy_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.25))
 	thbox.add_child(randy_label)
 
-	var trigger_randy_btn := Button.new()
-	trigger_randy_btn.text = "🎲 Хаос"
-	trigger_randy_btn.custom_minimum_size = Vector2(86, 40)
-	trigger_randy_btn.pressed.connect(_trigger_randy_event)
-	thbox.add_child(trigger_randy_btn)
-
-	var alt_btn := Button.new()
+		var alt_btn := Button.new()
 	alt_btn.text = "ALT"
 	alt_btn.custom_minimum_size = Vector2(54, 40)
 	alt_btn.pressed.connect(func():
 		show_alt_labels = not show_alt_labels
-		colon
+		colony_canvas.queue_redraw()
+	)
+	thbox.add_child(alt_btn)
