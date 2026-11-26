@@ -31,11 +31,7 @@ jobs:
 
           if [ ! -f "$TPL_DIR/android_debug.apk" ]; then
             URL="https://github.com/godotengine/godot/releases/download/4.2.2-stable/Godot_v4.2.2-stable_export_templates.tpz"
-            if command -v wget >/dev/null 2>&1; then
-              wget -q -O /tmp/templates.tpz "$URL"
-            else
-              python3 -c "import urllib.request; urllib.request.urlretrieve('$URL', '/tmp/templates.tpz')"
-            fi
+            wget -q -O /tmp/templates.tpz "$URL"
             unzip -q /tmp/templates.tpz -d /tmp/templates
             mv /tmp/templates/templates/* "$TPL_DIR/"
           fi
@@ -50,7 +46,9 @@ jobs:
           cp "$HOME_DIR/.config/godot/editor_settings-4.editor_settings" "$HOME_DIR/.config/godot/editor_settings-4.tres"
 
           if [ -f "export_presets.cfg" ]; then
-            python3 -c 'import pathlib, re; p = pathlib.Path("export_presets.cfg"); t = p.read_text(encoding="utf-8"); t = re.sub(r"^keystore/debug=.*$", "keystore/debug=\"/github/home/.android/debug.keystore\"", t, flags=re.M); t = re.sub(r"^keystore/debug_user=.*$", "keystore/debug_user=\"androiddebugkey\"", t, flags=re.M); t = re.sub(r"^keystore/debug_password=.*$", "keystore/debug_password=\"android\"", t, flags=re.M); p.write_text(t, encoding="utf-8")'
+            grep -v '^keystore/debug=' export_presets.cfg | grep -v '^keystore/debug_user=' | grep -v '^keystore/debug_password=' > /tmp/export_presets.tmp
+            printf 'keystore/debug="%s"\nkeystore/debug_user="androiddebugkey"\nkeystore/debug_password="android"\n' "$KEYSTORE_PATH" >> /tmp/export_presets.tmp
+            mv /tmp/export_presets.tmp export_presets.cfg
           fi
 
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
