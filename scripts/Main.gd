@@ -563,6 +563,9 @@ func _build_colony_ui() -> void:
 	top_res_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	thbox.add_child(top_res_label)
 
+	time_label = Label.new()
+	thbox.add_child(time_label)
+
 	randy_label = Label.new()
 	randy_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.25))
 	thbox.add_child(randy_label)
@@ -578,8 +581,4 @@ func _build_colony_ui() -> void:
 	alt_btn.custom_minimum_size = Vector2(54, 40)
 	alt_btn.pressed.connect(func():
 		show_alt_labels = not show_alt_labels
-		colony_canvas.queue_redraw()
-	)
-	thbox.add_child(alt_btn)
-
-	v
+		colon
