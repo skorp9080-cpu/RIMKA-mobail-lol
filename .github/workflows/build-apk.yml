@@ -23,7 +23,7 @@ jobs:
           TPL_DIR="$HOME_DIR/.local/share/godot/export_templates/4.2.2.stable"
           KEYSTORE_PATH="$HOME_DIR/.android/debug.keystore"
 
-          mkdir -p "$HOME_DIR/.android" "$TPL_DIR" "$SDK_DIR" build/android
+          mkdir -p "$HOME_DIR/.android" "$TPL_DIR" "$SDK_DIR" "$HOME_DIR/.config/godot" build/android
 
           if [ ! -f "$KEYSTORE_PATH" ]; then
             keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
@@ -46,41 +46,16 @@ jobs:
           JAVA_BIN_PATH="$(readlink -f "$(which java)")"
           JAVA_DIR="$(dirname "$(dirname "$JAVA_BIN_PATH")")"
 
-          python3 - <<PY
-import pathlib, re
+          printf '[gd_editor_settings]\n\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/debug_keystore = "%s"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$SDK_DIR" "$JAVA_DIR" "$KEYSTORE_PATH" > "$HOME_DIR/.config/godot/editor_settings-4.editor_settings"
+          cp "$HOME_DIR/.config/godot/editor_settings-4.editor_settings" "$HOME_DIR/.config/godot/editor_settings-4.tres"
 
-ks = "$KEYSTORE_PATH"
-sdk = "$SDK_DIR"
-jdk = "$JAVA_DIR"
+          if [ -f "export_presets.cfg" ]; then
+            python3 -c 'import pathlib, re; p = pathlib.Path("export_presets.cfg"); t = p.read_text(encoding="utf-8"); t = re.sub(r"^keystore/debug=.*$", "keystore/debug=\"/github/home/.android/debug.keystore\"", t, flags=re.M); t = re.sub(r"^keystore/debug_user=.*$", "keystore/debug_user=\"androiddebugkey\"", t, flags=re.M); t = re.sub(r"^keystore/debug_password=.*$", "keystore/debug_password=\"android\"", t, flags=re.M); p.write_text(t, encoding="utf-8")'
+          fi
 
-for cfg_path in [pathlib.Path("export_presets.cfg")]:
-    if cfg_path.exists():
-        txt = cfg_path.read_text(encoding="utf-8")
-        replacements = {
-            "keystore/debug=": f'keystore/debug="{ks}"',
-            "keystore/debug_user=": 'keystore/debug_user="androiddebugkey"',
-            "keystore/debug_password=": 'keystore/debug_password="android"',
-        }
-        for key, val in replacements.items():
-            if re.search(rf"^{re.escape(key)}.*$", txt, flags=re.M):
-                txt = re.sub(rf"^{re.escape(key)}.*$", val, txt, flags=re.M)
-            else:
-                txt += f"\n{val}\n"
-        cfg_path.write_text(txt, encoding="utf-8")
-
-godot_cfg = pathlib.Path("$HOME_DIR/.config/godot")
-godot_cfg.mkdir(parents=True, exist_ok=True)
-settings_txt = f'''[gd_editor_settings]
-
-export/android/android_sdk_path = "{sdk}"
-export/android/java_sdk_path = "{jdk}"
-export/android/debug_keystore = "{ks}"
-export/android/debug_keystore_user = "androiddebugkey"
-export/android/debug_keystore_pass = "android"
-'''
-for fname in ["editor_settings-4.editor_settings", "editor_settings-4.tres"]:
-    (godot_cfg / fname).write_text(settings_txt, encoding="utf-8")
-PY
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_DIR" >> "$GITHUB_ENV"
 
       - name: Export Debug APK
         run: |
@@ -91,3 +66,4 @@ PY
         with:
           name: RimWorldColony-Android-APK
           path: build/android/RimWorldColony.apk
+          
