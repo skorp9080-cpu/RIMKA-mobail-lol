@@ -18,10 +18,15 @@ jobs:
       - name: Setup Android SDK, Java & Export Templates
         run: |
           set -e
-          mkdir -p ~/.android /github/home/.local/share/godot/export_templates/4.2.2.stable build/android
+          HOME_DIR="/github/home"
+          SDK_DIR="/usr/local/android-sdk"
+          TPL_DIR="$HOME_DIR/.local/share/godot/export_templates/4.2.2.stable"
+          KEYSTORE_PATH="$HOME_DIR/.android/debug.keystore"
 
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair -v -keystore ~/.android/debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p "$HOME_DIR/.android" "$TPL_DIR" "$SDK_DIR" build/android
+
+          if [ ! -f "$KEYSTORE_PATH" ]; then
+            keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
           fi
 
           URL="https://github.com/godotengine/godot/releases/download/4.2.2-stable/Godot_v4.2.2-stable_export_templates.tpz"
@@ -32,25 +37,27 @@ jobs:
           fi
 
           unzip -q /tmp/templates.tpz -d /tmp/templates
-          mv /tmp/templates/templates/* /github/home/.local/share/godot/export_templates/4.2.2.stable/
+          mv /tmp/templates/templates/* "$TPL_DIR/"
 
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/android-sdk}}"
-          mkdir -p "$SDK_ROOT"
-          yes | sdkmanager --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
-          sdkmanager --sdk_root="$SDK_ROOT" "platforms;android-33" "build-tools;33.0.2" >/dev/null
+          yes | sdkmanager --sdk_root="$SDK_DIR" --licenses >/dev/null || true
+          sdkmanager --sdk_root="$SDK_DIR" "platforms;android-33" "build-tools;33.0.2" >/dev/null
 
-          JAVA_BIN="$(dirname "$(readlink -f "$(which java)")")"
-          JAVA_HOME_DIR="$(dirname "$JAVA_BIN")"
+          JAVA_BIN_PATH="$(readlink -f "$(which java)")"
+          JAVA_DIR="$(dirname "$(dirname "$JAVA_BIN_PATH")")"
 
-          mkdir -p /github/home/.config/godot
-          cat > /github/home/.config/godot/editor_settings-4.editor_settings <<EOF
+          mkdir -p "$HOME_DIR/.config/godot"
+          cat > "$HOME_DIR/.config/godot/editor_settings-4.editor_settings" <<EOF
           [gd_editor_settings]
-          export/android/android_sdk_path = "$SDK_ROOT"
-          export/android/java_sdk_path = "$JAVA_HOME_DIR"
-          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/android_sdk_path = "$SDK_DIR"
+          export/android/java_sdk_path = "$JAVA_DIR"
+          export/android/debug_keystore = "$KEYSTORE_PATH"
           export/android/debug_keystore_user = "androiddebugkey"
           export/android/debug_keystore_pass = "android"
           EOF
+
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_DIR" >> "$GITHUB_ENV"
 
       - name: Export Debug APK
         run: |
@@ -61,4 +68,3 @@ jobs:
         with:
           name: RimWorldColony-Android-APK
           path: build/android/RimWorldColony.apk
-          
