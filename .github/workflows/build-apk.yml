@@ -29,35 +29,58 @@ jobs:
             keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          URL="https://github.com/godotengine/godot/releases/download/4.2.2-stable/Godot_v4.2.2-stable_export_templates.tpz"
-          if command -v wget >/dev/null 2>&1; then
-            wget -q -O /tmp/templates.tpz "$URL"
-          else
-            python3 -c "import urllib.request; urllib.request.urlretrieve('$URL', '/tmp/templates.tpz')"
+          if [ ! -f "$TPL_DIR/android_debug.apk" ]; then
+            URL="https://github.com/godotengine/godot/releases/download/4.2.2-stable/Godot_v4.2.2-stable_export_templates.tpz"
+            if command -v wget >/dev/null 2>&1; then
+              wget -q -O /tmp/templates.tpz "$URL"
+            else
+              python3 -c "import urllib.request; urllib.request.urlretrieve('$URL', '/tmp/templates.tpz')"
+            fi
+            unzip -q /tmp/templates.tpz -d /tmp/templates
+            mv /tmp/templates/templates/* "$TPL_DIR/"
           fi
 
-          unzip -q /tmp/templates.tpz -d /tmp/templates
-          mv /tmp/templates/templates/* "$TPL_DIR/"
-
           yes | sdkmanager --sdk_root="$SDK_DIR" --licenses >/dev/null || true
-          sdkmanager --sdk_root="$SDK_DIR" "platforms;android-33" "build-tools;33.0.2" >/dev/null
+          sdkmanager --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" >/dev/null
 
           JAVA_BIN_PATH="$(readlink -f "$(which java)")"
           JAVA_DIR="$(dirname "$(dirname "$JAVA_BIN_PATH")")"
 
-          mkdir -p "$HOME_DIR/.config/godot"
-          cat > "$HOME_DIR/.config/godot/editor_settings-4.editor_settings" <<EOF
-          [gd_editor_settings]
-          export/android/android_sdk_path = "$SDK_DIR"
-          export/android/java_sdk_path = "$JAVA_DIR"
-          export/android/debug_keystore = "$KEYSTORE_PATH"
-          export/android/debug_keystore_user = "androiddebugkey"
-          export/android/debug_keystore_pass = "android"
-          EOF
+          python3 - <<PY
+import pathlib, re
 
-          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
-          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
-          echo "JAVA_HOME=$JAVA_DIR" >> "$GITHUB_ENV"
+ks = "$KEYSTORE_PATH"
+sdk = "$SDK_DIR"
+jdk = "$JAVA_DIR"
+
+for cfg_path in [pathlib.Path("export_presets.cfg")]:
+    if cfg_path.exists():
+        txt = cfg_path.read_text(encoding="utf-8")
+        replacements = {
+            "keystore/debug=": f'keystore/debug="{ks}"',
+            "keystore/debug_user=": 'keystore/debug_user="androiddebugkey"',
+            "keystore/debug_password=": 'keystore/debug_password="android"',
+        }
+        for key, val in replacements.items():
+            if re.search(rf"^{re.escape(key)}.*$", txt, flags=re.M):
+                txt = re.sub(rf"^{re.escape(key)}.*$", val, txt, flags=re.M)
+            else:
+                txt += f"\n{val}\n"
+        cfg_path.write_text(txt, encoding="utf-8")
+
+godot_cfg = pathlib.Path("$HOME_DIR/.config/godot")
+godot_cfg.mkdir(parents=True, exist_ok=True)
+settings_txt = f'''[gd_editor_settings]
+
+export/android/android_sdk_path = "{sdk}"
+export/android/java_sdk_path = "{jdk}"
+export/android/debug_keystore = "{ks}"
+export/android/debug_keystore_user = "androiddebugkey"
+export/android/debug_keystore_pass = "android"
+'''
+for fname in ["editor_settings-4.editor_settings", "editor_settings-4.tres"]:
+    (godot_cfg / fname).write_text(settings_txt, encoding="utf-8")
+PY
 
       - name: Export Debug APK
         run: |
