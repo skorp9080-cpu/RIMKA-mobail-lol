@@ -14,6 +14,15 @@ func _ready() -> void:
 	_generate_local_map()
 	_spawn_colonists()
 	_build_top_bar()
+	_ensure_mobile_hud()
+
+func _ensure_mobile_hud() -> void:
+	if get_tree().root.get_node_or_null("MobileHUD") == null:
+		var hud_script: GDScript = load("res://scripts/mobile_hud_controller.gd") as GDScript
+		if hud_script != null:
+			var hud_node: Node2D = hud_script.new() as Node2D
+			hud_node.name = "MobileHUD"
+			add_child(hud_node)
 
 func _setup_camera() -> void:
 	camera = Camera2D.new()
@@ -47,11 +56,11 @@ func _generate_local_map() -> void:
 	var center_x: int = GRID_W / 2
 	var center_y: int = GRID_H / 2
 
-	for y in range(GRID_H):
-		for x in range(GRID_W):
+	for y: int in range(GRID_H):
+		for x: int in range(GRID_W):
 			var rect: ColorRect = ColorRect.new()
 			rect.size = Vector2(TILE_SIZE, TILE_SIZE)
-			rect.position = Vector2(x * TILE_SIZE, y * TILE_SIZE)
+			rect.position = Vector2(float(x) * TILE_SIZE, float(y) * TILE_SIZE)
 			rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 			var dist_center: float = Vector2(x - center_x, y - center_y).length()
@@ -69,10 +78,9 @@ func _generate_local_map() -> void:
 				rect.name = "Rock_%d_%d" % [x, y]
 				add_child(rect)
 
-				# Додаємо об'ємну верхівку скелі
 				var ridge: ColorRect = ColorRect.new()
 				ridge.size = Vector2(TILE_SIZE - 6.0, TILE_SIZE - 8.0)
-				ridge.position = Vector2(x * TILE_SIZE + 3.0, y * TILE_SIZE + 2.0)
+				ridge.position = Vector2(float(x) * TILE_SIZE + 3.0, float(y) * TILE_SIZE + 2.0)
 				ridge.color = Color(0.50, 0.49, 0.47)
 				ridge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 				add_child(ridge)
@@ -88,25 +96,26 @@ func _generate_local_map() -> void:
 				if rng.randf() < tree_density:
 					var tree: ColorRect = ColorRect.new()
 					tree.size = Vector2(18, 18)
-					tree.position = Vector2(x * TILE_SIZE + 7.0, y * TILE_SIZE + 7.0)
+					tree.position = Vector2(float(x) * TILE_SIZE + 7.0, float(y) * TILE_SIZE + 7.0)
 					tree.color = Color(0.10, 0.28, 0.10)
 					tree.mouse_filter = Control.MOUSE_FILTER_IGNORE
 					add_child(tree)
 
 func _spawn_colonists() -> void:
-	var names: Array = ["Олекса", "Соломія", "Богдан"]
-	var center: Vector2 = Vector2(GRID_W * TILE_SIZE * 0.5, GRID_H * TILE_SIZE * 0.5)
+	var names: PackedStringArray = PackedStringArray(["Олекса", "Соломія", "Богдан"])
+	var center: Vector2 = Vector2(float(GRID_W) * TILE_SIZE * 0.5, float(GRID_H) * TILE_SIZE * 0.5)
 	var saved_pawns: Array = GameState.loaded_save_data.get("colonists", []) if GameState.is_loading_save else []
 
-	for i in range(names.size()):
+	for i: int in range(names.size()):
 		var pawn: Node2D = Node2D.new()
-		pawn.name = str(names[i])
+		pawn.name = names[i]
 		pawn.add_to_group("colonists")
 
 		if i < saved_pawns.size() and saved_pawns[i] is Dictionary:
-			pawn.position = Vector2(float(saved_pawns[i]["x"]), float(saved_pawns[i]["y"]))
+			var p_dict: Dictionary = saved_pawns[i]
+			pawn.position = Vector2(float(p_dict["x"]), float(p_dict["y"]))
 		else:
-			pawn.position = center + Vector2((i - 1) * 56.0, 0.0)
+			pawn.position = center + Vector2(float(i - 1) * 56.0, 0.0)
 
 		var body: ColorRect = ColorRect.new()
 		body.size = Vector2(18, 22)
@@ -165,8 +174,9 @@ func _build_top_bar() -> void:
 
 func _save_current_colony(status_lbl: Label) -> void:
 	var pawn_list: Array = []
-	for p in colonists:
-		if is_instance_valid(p):
+	for i: int in range(colonists.size()):
+		var p: Node2D = colonists[i] as Node2D
+		if p != null and is_instance_valid(p):
 			pawn_list.append({"name": p.name, "x": p.position.x, "y": p.position.y})
 	var ok: bool = GameState.save_game({"colonists": pawn_list})
 	status_lbl.text = "  Гру збережено!" if ok else "  Помилка збереження"
