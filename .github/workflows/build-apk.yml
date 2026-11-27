@@ -5,6 +5,10 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+env:
+  ANDROID_HOME: /usr/local/android-sdk
+  ANDROID_SDK_ROOT: /usr/local/android-sdk
+
 jobs:
   export-android:
     name: Export APK
@@ -17,8 +21,8 @@ jobs:
 
       - name: Setup environment and templates
         run: |
-          set -e
-          SDK_DIR="/usr/local/android-sdk"
+          set -euo pipefail
+          SDK_DIR="${ANDROID_SDK_ROOT}"
           KEYSTORE_PATH="/root/.android/debug.keystore"
           TPL_ROOT="/root/.local/share/godot/export_templates/4.2.2.stable"
           TPL_GH="/github/home/.local/share/godot/export_templates/4.2.2.stable"
@@ -42,20 +46,21 @@ jobs:
           sdkmanager --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" >/dev/null
 
           JAVA_DIR="$(dirname "$(dirname "$(readlink -f "$(which javac)")")")"
+          ADB_PATH="$SDK_DIR/platform-tools/adb"
           echo "Detected JAVA_DIR: $JAVA_DIR"
 
           for cfg_dir in /root/.config/godot /github/home/.config/godot; do
             for fname in editor_settings-4.tres editor_settings-4.editor_settings; do
-              printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/debug_keystore = "%s"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$SDK_DIR" "$JAVA_DIR" "$KEYSTORE_PATH" > "$cfg_dir/$fname"
+              printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/adb = "%s"\nexport/android/debug_keystore = "%s"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$SDK_DIR" "$JAVA_DIR" "$ADB_PATH" "$KEYSTORE_PATH" > "$cfg_dir/$fname"
             done
           done
 
-          if ! grep -q "import_etc2_astc=true" project.godot; then
-            if grep -q "^\[rendering\]" project.godot; then
-              sed -i '/^\[rendering\]/a textures/vram_compression/import_etc2_astc=true' project.godot
-            else
-              printf '\n[rendering]\n\ntextures/vram_compression/import_etc2_astc=true\n' >> project.godot
-            fi
+          if grep -q "textures/vram_compression/import_etc2_astc=" project.godot; then
+            sed -i 's/textures\/vram_compression\/import_etc2_astc=.*/textures\/vram_compression\/import_etc2_astc=true/' project.godot
+          elif grep -q "^\[rendering\]" project.godot; then
+            sed -i '/^\[rendering\]/a textures/vram_compression/import_etc2_astc=true' project.godot
+          else
+            printf '\n[rendering]\n\ntextures/vram_compression/import_etc2_astc=true\n' >> project.godot
           fi
 
           printf '%s\n' \
@@ -81,8 +86,6 @@ jobs:
             'custom_template/release=""' \
             'gradle_build/use_gradle_build=false' \
             'gradle_build/export_format=0' \
-            'gradle_build/min_sdk=""' \
-            'gradle_build/target_sdk=""' \
             'architectures/armeabi-v7a=false' \
             'architectures/arm64-v8a=true' \
             'architectures/x86=false' \
@@ -92,7 +95,7 @@ jobs:
             'package/unique_name="com.denys.rimworldcolony"' \
             'package/name="RimWorld Colony"' \
             'package/signed=true' \
-            'keystore/debug="/root/.android/debug.keystore"' \
+            'keystore/debug="'"$KEYSTORE_PATH"'"' \
             'keystore/debug_user="androiddebugkey"' \
             'keystore/debug_password="android"' \
             'keystore/release=""' \
@@ -107,8 +110,9 @@ jobs:
 
       - name: Export Debug APK
         run: |
+          set -euo pipefail
           mkdir -p build/android .godot/editor
-          godot --headless --import || true
+          godot --headless --import
           godot --headless --export-debug "Android" build/android/RimWorldColony.apk
 
       - name: Upload APK Artifact
