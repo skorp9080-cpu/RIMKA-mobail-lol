@@ -584,3 +584,108 @@ func _build_colony_ui() -> void:
 		colony_canvas.queue_redraw()
 	)
 	thbox.add_child(alt_btn)
+func _trigger_randy_event() -> void:
+	var events := [
+		func():
+			resources["food"] += 25
+			_add_letter("Ренді скинув транспортну капсулу з +25 їжі."),
+		func():
+			resources["steel"] += 30
+			_add_letter("Знайдено уламки з +30 сталі."),
+		func():
+			resources["wood"] += 35
+			_add_letter("Ренді пригнав +35 деревини."),
+		func():
+			_add_letter("Ренді просто посміхнувся. Тиша перед бурею.")
+	]
+	var idx := randi() % events.size()
+	events[idx].call()
+	randy_timer = randf_range(15.0, 35.0)
+	_update_hud()
+
+func _world_to_screen(world_p: Vector2) -> Vector2:
+	var center := colony_canvas.size * 0.5
+	return (world_p - cam_pos) * cam_zoom + center
+
+func _screen_to_world(screen_p: Vector2) -> Vector2:
+	var center := colony_canvas.size * 0.5
+	return (screen_p - center) / cam_zoom + cam_pos
+
+func _draw_colony() -> void:
+	if terrain_grid.is_empty():
+		return
+	var ter_keys := ["grass", "soil", "sand", "snow", "water"]
+	var obj_keys := {
+		1: "rock",
+		2: "steel_ore",
+		3: "tree",
+		4: "berry_bush",
+		5: "wall_wood",
+		6: "door",
+		7: "bed",
+		8: "campfire"
+	}
+
+	for y in range(MAP_H):
+		for x in range(MAP_W):
+			var top_left := _world_to_screen(Vector2(x * TILE_SIZE, y * TILE_SIZE))
+			var sz := Vector2(TILE_SIZE * cam_zoom, TILE_SIZE * cam_zoom)
+			if top_left.x + sz.x < 0 or top_left.y + sz.y < 0 or top_left.x > colony_canvas.size.x or top_left.y > colony_canvas.size.y:
+				continue
+
+			var t_idx: int = terrain_grid[y][x]
+			var t_key: String = ter_keys[clampi(t_idx, 0, ter_keys.size() - 1)]
+			if tex_map.has(t_key):
+				colony_canvas.draw_texture_rect(tex_map[t_key], Rect2(top_left, sz), false)
+
+			if stockpile_grid[y][x]:
+				colony_canvas.draw_rect(Rect2(top_left, sz), Color(0.9, 0.8, 0.2, 0.16), true)
+
+			var o_id: int = object_grid[y][x]
+			if obj_keys.has(o_id) and tex_map.has(obj_keys[o_id]):
+				colony_canvas.draw_texture_rect(tex_map[obj_keys[o_id]], Rect2(top_left, sz), false)
+
+			var des: int = designation_grid[y][x]
+			if des != 0:
+				colony_canvas.draw_rect(Rect2(top_left + Vector2(2, 2), sz - Vector2(4, 4)), Color(1.0, 0.65, 0.1, 0.45), true)
+
+			if show_alt_labels and o_id != 0 and obj_keys.has(o_id):
+				colony_canvas.draw_string(ThemeDB.fallback_font, top_left + Vector2(4, 14), str(obj_keys[o_id]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.85))
+
+	for i in range(pawns.size()):
+		var p: Dictionary = pawns[i]
+		var sp := _world_to_screen(p["pos"])
+		var p_sz := Vector2(TILE_SIZE * cam_zoom, TILE_SIZE * cam_zoom)
+		if tex_map.has("pawn"):
+			colony_canvas.draw_texture_rect(tex_map["pawn"], Rect2(sp - p_sz * 0.5, p_sz), false)
+		if i == selected_pawn_idx:
+			colony_canvas.draw_rect(Rect2(sp - p_sz * 0.5, p_sz), Color(0.2, 0.9, 0.4, 0.85), false, 2.0)
+		colony_canvas.draw_string(ThemeDB.fallback_font, sp + Vector2(-18, -p_sz.y * 0.5 - 4), p["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.95))
+
+func _on_colony_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			cam_zoom = clampf(cam_zoom * 1.15, 0.4, 2.5)
+			colony_canvas.queue_redraw()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			cam_zoom = clampf(cam_zoom / 1.15, 0.4, 2.5)
+			colony_canvas.queue_redraw()
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				is_dragging = true
+				drag_moved = false
+				touch_start_pos = event.position
+				last_drag_pos = event.position
+			else:
+				if not drag_moved:
+					_apply_colony_tool_at(_screen_to_world(event.position))
+				is_dragging = false
+	elif event is InputEventMouseMotion and is_dragging:
+		var delta_pos: Vector2 = event.position - last_drag_pos
+		if event.position.distance_to(touch_start_pos) > 8.0:
+			drag_moved = true
+		cam_pos -= delta_pos / cam_zoom
+		cam_pos.x = clampf(cam_pos.x, 0.0, MAP_W * TILE_SIZE)
+		cam_pos.y = clampf(cam_pos.y, 0.0, MAP_H * TILE_SIZE)
+		last_drag_pos = event.position
+		colony_canvas.queue_redraw()
