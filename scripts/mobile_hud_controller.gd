@@ -1,6 +1,7 @@
 extends Node2D
 
 const TILE_SIZE: float = 32.0
+const TEX_SIZE: int = 128
 const SELECT_RADIUS: float = 36.0
 const WORK_DISTANCE: float = 38.0
 
@@ -557,5 +558,4 @@ func import_save_state(state: Dictionary) -> void:
 	wood = int(state.get("wood", 200))
 	steel = int(state.get("steel", 140))
 	stone = int(state.get("stone", 120))
-	food = int(state.get("food", 80))
-	_refresh_resource_bar
+	food = int(state.get("food", 8
