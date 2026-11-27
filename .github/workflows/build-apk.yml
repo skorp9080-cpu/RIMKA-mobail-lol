@@ -99,17 +99,17 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
           echo "JAVA_HOME=$JAVA_DIR" >> "$GITHUB_ENV"
-
       - name: Export Debug APK
         run: |
           mkdir -p build/android
-          ls -la /root/.android/debug.keystore /root/.local/share/godot/export_templates/4.2.2.stable/android_debug.apk
-          grep -n "keystore/debug=" export_presets.cfg || true
+          echo "=== KEYSTORE & TEMPLATES ==="
+          ls -la /root/.android/debug.keystore /github/home/.android/debug.keystore /root/.local/share/godot/export_templates/4.2.2.stable/android_debug.apk 2>&1 || true
+          echo "=== SDK & JAVA ==="
+          ls -d /usr/local/android-sdk/platforms/android-33 /usr/local/android-sdk/build-tools/33.0.2 2>&1 || true
+          java -version 2>&1 || true
+          echo "=== PRESET KEYSTORE & PACKAGE ==="
+          grep -nE 'keystore/|package/|gradle_build/|architectures/' export_presets.cfg 2>&1 || true
+          echo "=== RUN GODOT EXPORT ==="
           godot --headless --verbose --export-debug "Android" build/android/RimWorldColony.apk
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: RimWorldColony-Android-APK
-          path: build/android/RimWorldColony.apk
+          
           
