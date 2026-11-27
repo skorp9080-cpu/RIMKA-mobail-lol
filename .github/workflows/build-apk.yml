@@ -103,13 +103,16 @@ jobs:
       - name: Export Debug APK
         run: |
           mkdir -p build/android
-          godot --headless --export-debug "Android" build/android/RimWorldColony.apk || {
-            echo "=== TEMPLATES CHECK ==="
-            ls -la /root/.local/share/godot/export_templates/4.2.2.stable /github/home/.local/share/godot/export_templates/4.2.2.stable 2>&1 || true
-            echo "=== KEYSTORE CHECK ==="
-            ls -la /root/.android/debug.keystore /github/home/.android/debug.keystore 2>&1 || true
+          godot --headless --export-debug "Android" build/android/RimWorldColony.apk > /tmp/godot_export.log 2>&1 || {
+            cat /tmp/godot_export.log
+            echo "=== SDK CHECK ==="
+            ls -la /usr/local/android-sdk /usr/local/android-sdk/platforms /usr/local/android-sdk/build-tools 2>&1 || true
+            echo "=== PRESET CHECK ==="
+            pwd
+            cat export_presets.cfg 2>&1 || true
             exit 1
           }
+          
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
