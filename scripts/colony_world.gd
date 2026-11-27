@@ -4,6 +4,7 @@ const GRID_W: int = 80
 const GRID_H: int = 56
 const TILE_SIZE: float = 32.0
 const TEX_SIZE: int = 128
+const SAVE_PATH: String = "user://colony_save.json"
 
 var camera: Camera2D
 var day_night_modulate: CanvasModulate
@@ -14,6 +15,8 @@ var raiders: Array = []
 var wildlife: Array = []
 var nature_textures: Dictionary = {}
 var event_timer: float = 38.0
+var _drag_active: bool = false
+var _last_drag_pos: Vector2 = Vector2.ZERO
 
 const TRAITS_POOL: PackedStringArray = PackedStringArray(["Оптиміст", "Працьовитий", "Стрілець", "Нічна сова", "Песиміст"])
 const EXTRA_NAMES: PackedStringArray = PackedStringArray(["Тарас", "Дарина", "Мирослав", "Зоряна", "Іван", "Квітка"])
@@ -36,6 +39,9 @@ func _ready() -> void:
 	_spawn_initial_colonists()
 	_build_top_bar()
 	_ensure_mobile_hud()
+	_update_temperature()
+	_update_lighting()
+	_update_top_label()
 
 func focus_on_colonist(pawn: Node2D) -> void:
 	if camera != null and pawn != null and is_instance_valid(pawn):
@@ -44,14 +50,19 @@ func focus_on_colonist(pawn: Node2D) -> void:
 func _ensure_mobile_hud() -> void:
 	var hud: Node = get_tree().root.get_node_or_null("MobileHUD")
 	if hud == null:
+		hud = get_node_or_null("MobileHUD")
+	if hud == null:
 		var hud_script: GDScript = load("res://scripts/mobile_hud_controller.gd") as GDScript
 		if hud_script != null:
 			hud = hud_script.new() as Node2D
 			hud.name = "MobileHUD"
 			add_child(hud)
-	if hud != null and GameState.is_loading_save and hud.has_method("import_save_state"):
-		var hud_state: Dictionary = GameState.loaded_save_data.get("hud_state", {})
-		hud.call("import_save_state", hud_state)
+	if hud != null:
+		if hud.has_method("rebuild_colonist_bar"):
+			hud.call("rebuild_colonist_bar")
+		if GameState.is_loading_save and hud.has_method("import_save_state"):
+			var hud_state: Dictionary = GameState.loaded_save_data.get("hud_state", {})
+			hud.call("import_save_state", hud_state)
 
 func _setup_camera() -> void:
 	camera = Camera2D.new()
@@ -64,6 +75,144 @@ func _setup_day_night() -> void:
 	day_night_modulate = CanvasModulate.new()
 	day_night_modulate.color = Color.WHITE
 	add_child(day_night_modulate)
+
+func _build_top_bar() -> void:
+	var layer: CanvasLayer = CanvasLayer.new()
+	layer.layer = 16
+	add_child(layer)
+
+	var bar: PanelContainer = PanelContainer.new()
+	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	bar.offset_bottom = 44
+	layer.add_child(bar)
+
+	var hbox: HBoxContainer = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 6)
+	bar.add_child(hbox)
+
+	top_status_lbl = Label.new()
+	top_status_lbl.add_theme_font_size_override("font_size", 12)
+	top_status_lbl.text = " Д.1 08:00 | +18°C"
+	hbox.add_child(top_status_lbl)
+
+	var spacer: Control = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(spacer)
+
+	var speeds: Array = [
+		{"val": 0.0, "label": "||"},
+		{"val": 1.0, "label": "1x"},
+		{"val": 2.0, "label": "2x"},
+		{"val": 4.0, "label": "4x"}
+	]
+	for i: int in range(speeds.size()):
+		var s_item: Dictionary = speeds[i]
+		var spd_val: float = float(s_item["val"])
+		var btn: Button = Button.new()
+		btn.text = str(s_item["label"])
+		btn.custom_minimum_size = Vector2(40, 32)
+		btn.add_theme_font_size_override("font_size", 12)
+		btn.pressed.connect(func(): _set_time_speed(spd_val))
+		hbox.add_child(btn)
+		speed_buttons[spd_val] = btn
+
+	var btn_save: Button = Button.new()
+	btn_save.text = "Зберегти"
+	btn_save.custom_minimum_size = Vector2(74, 32)
+	btn_save.add_theme_font_size_override("font_size", 12)
+	btn_save.pressed.connect(func(): _save_current_colony(true))
+	hbox.add_child(btn_save)
+
+	var btn_menu: Button = Button.new()
+	btn_menu.text = "Меню"
+	btn_menu.custom_minimum_size = Vector2(60, 32)
+	btn_menu.add_theme_font_size_override("font_size", 12)
+	btn_menu.pressed.connect(func():
+		if bool(GameState.settings.get("autosave", true)):
+			_save_current_colony(false)
+		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+	)
+	hbox.add_child(btn_menu)
+
+	_set_time_speed(GameState.time_speed)
+
+func _set_time_speed(spd: float) -> void:
+	GameState.time_speed = spd
+	for k in speed_buttons.keys():
+		var b: Button = speed_buttons[k] as Button
+		if b != null:
+			b.modulate = Color(1.0, 0.9, 0.4) if is_equal_approx(float(k), spd) else Color.WHITE
+
+func _save_current_colony(notify_user: bool) -> void:
+	var col_data: Array = []
+	for i: int in range(colonists.size()):
+		var p: Node2D = colonists[i] as Node2D
+		if p != null and is_instance_valid(p):
+			col_data.append({
+				"name": p.name,
+				"x": p.global_position.x,
+				"y": p.global_position.y,
+				"trait": str(p.get_meta("trait", "Оптиміст")),
+				"hp": float(p.get_meta("hp", 100.0)),
+				"mood": float(p.get_meta("mood", 85.0)),
+				"hunger": float(p.get_meta("hunger", 100.0)),
+				"energy": float(p.get_meta("energy", 100.0)),
+				"skill_work": int(p.get_meta("skill_work", 4)),
+				"skill_combat": int(p.get_meta("skill_combat", 3)),
+				"has_armor": bool(p.get_meta("has_armor", false)),
+				"has_rifle": bool(p.get_meta("has_rifle", false))
+			})
+
+	var animal_data: Array = []
+	for i: int in range(wildlife.size()):
+		var a: Node2D = wildlife[i] as Node2D
+		if a != null and is_instance_valid(a):
+			animal_data.append({
+				"kind": str(a.get_meta("kind", "deer")),
+				"x": a.global_position.x,
+				"y": a.global_position.y,
+				"tamed": bool(a.get_meta("tamed", false))
+			})
+
+	var hud_state: Dictionary = {}
+	var hud: Node = _get_hud()
+	if hud != null and hud.has_method("export_save_state"):
+		hud_state = hud.call("export_save_state")
+
+	var payload: Dictionary = {
+		"planet_seed": GameState.planet_seed,
+		"selected_tile": GameState.selected_tile,
+		"current_day": GameState.current_day,
+		"game_time_hours": GameState.game_time_hours,
+		"unlocked_techs": GameState.unlocked_techs,
+		"active_research_id": GameState.active_research_id,
+		"research_progress": GameState.research_progress,
+		"colonists": col_data,
+		"wildlife": animal_data,
+		"hud_state": hud_state
+	}
+
+	var f: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(payload))
+		f.close()
+		if notify_user and hud != null and hud.has_method("notify_event"):
+			hud.call("notify_event", "Колонію збережено (День %d)" % GameState.current_day)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if camera == null:
+		return
+	var cam_spd: float = float(GameState.settings.get("camera_speed", 1.0))
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
+			_drag_active = event.pressed
+			_last_drag_pos = event.position
+	elif event is InputEventMouseMotion and _drag_active:
+		var delta_pos: Vector2 = event.position - _last_drag_pos
+		_last_drag_pos = event.position
+		camera.position -= (delta_pos / camera.zoom.x) * cam_spd
+	elif event is InputEventScreenDrag:
+		camera.position -= (event.relative / camera.zoom.x) * cam_spd
 
 func _process(delta: float) -> void:
 	var sim_delta: float = delta * GameState.time_speed
@@ -403,138 +552,4 @@ func _generate_local_map() -> void:
 		ty = int(tile_info.get("y", 0))
 		rock_density = float(tile_info.get("rock_density", 0.22))
 		tree_density = float(tile_info.get("tree_density", 0.16))
-		biome = str(tile_info.get("biome", biome))
-	elif GameState.selected_tile is Vector2i:
-		var v: Vector2i = GameState.selected_tile
-		tx = v.x
-		ty = v.y
-
-	var local_seed: int = GameState.planet_seed + tx * 131 + ty * 977
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.seed = local_seed
-
-	var rock_noise: FastNoiseLite = FastNoiseLite.new()
-	rock_noise.seed = local_seed + 55
-	rock_noise.frequency = 0.085
-
-	var base_ground: Color = Color(0.20, 0.44, 0.18)
-	if biome == "Посушливі скелі" or biome == "Пустеля":
-		base_ground = Color(0.62, 0.52, 0.30)
-	elif biome == "Холодна тайга" or "Тундра" in biome:
-		base_ground = Color(0.36, 0.48, 0.44)
-	elif biome == "Скелясті гори" or "Гори" in biome:
-		base_ground = Color(0.28, 0.36, 0.24)
-
-	var center_x: int = GRID_W / 2
-	var center_y: int = GRID_H / 2
-
-	for y: int in range(GRID_H):
-		for x: int in range(GRID_W):
-			var rect: ColorRect = ColorRect.new()
-			rect.size = Vector2(TILE_SIZE, TILE_SIZE)
-			rect.position = Vector2(float(x) * TILE_SIZE, float(y) * TILE_SIZE)
-			rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-			var dist_center: float = Vector2(x - center_x, y - center_y).length()
-			var n_val: float = (rock_noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
-
-			if dist_center < 6.5:
-				rect.color = base_ground.lightened(0.14)
-				add_child(rect)
-				continue
-
-			if n_val > (1.0 - rock_density):
-				rect.color = Color(0.36, 0.35, 0.34)
-				rect.name = "Rock_%d_%d" % [x, y]
-				add_child(rect)
-
-				var ridge: ColorRect = ColorRect.new()
-				ridge.size = Vector2(TILE_SIZE - 6.0, TILE_SIZE - 8.0)
-				ridge.position = Vector2(float(x) * TILE_SIZE + 3.0, float(y) * TILE_SIZE + 2.0)
-				ridge.color = Color(0.50, 0.49, 0.47)
-				ridge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-				add_child(ridge)
-			elif n_val < 0.13:
-				rect.color = Color(0.14, 0.38, 0.72)
-				add_child(rect)
-			else:
-				rect.color = base_ground
-				add_child(rect)
-
-				var roll: float = rng.randf()
-				if roll < tree_density:
-					_spawn_nature_sprite("Tree_%d_%d" % [x, y], "tree", x, y)
-				elif roll < tree_density + 0.032:
-					_spawn_nature_sprite("Berry_%d_%d" % [x, y], "berry", x, y)
-				elif roll < tree_density + 0.056:
-					_spawn_nature_sprite("Mushroom_%d_%d" % [x, y], "mushroom", x, y)
-
-func _spawn_nature_sprite(node_name: String, tex_key: String, gx: int, gy: int) -> void:
-	var spr: TextureRect = TextureRect.new()
-	spr.name = node_name
-	spr.texture = nature_textures.get(tex_key) as Texture2D
-	spr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	spr.stretch_mode = TextureRect.STRETCH_SCALE
-	spr.size = Vector2(TILE_SIZE, TILE_SIZE)
-	spr.position = Vector2(float(gx) * TILE_SIZE, float(gy) * TILE_SIZE)
-	spr.z_index = 1
-	spr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(spr)
-
-func _spawn_initial_colonists() -> void:
-	var center: Vector2 = Vector2(float(GRID_W) * TILE_SIZE * 0.5, float(GRID_H) * TILE_SIZE * 0.5)
-	var saved_pawns: Array = GameState.loaded_save_data.get("colonists", []) if GameState.is_loading_save else []
-
-	if not saved_pawns.is_empty():
-		for i: int in range(saved_pawns.size()):
-			if saved_pawns[i] is Dictionary:
-				var p_dict: Dictionary = saved_pawns[i]
-				_create_colonist_pawn(str(p_dict.get("name", "Колоніст")), Vector2(float(p_dict["x"]), float(p_dict["y"])), p_dict)
-		return
-
-	var names: PackedStringArray = PackedStringArray(["Олекса", "Соломія", "Богдан"])
-	for i: int in range(names.size()):
-		_create_colonist_pawn(names[i], center + Vector2(float(i - 1) * 56.0, 0.0), {})
-
-func _create_colonist_pawn(p_name: String, pos: Vector2, saved_dict: Dictionary) -> void:
-	var pawn: Node2D = Node2D.new()
-	pawn.name = p_name
-	pawn.add_to_group("colonists")
-	pawn.position = pos
-	pawn.z_index = 5
-
-	var trait_str: String = str(saved_dict.get("trait", TRAITS_POOL[randi() % TRAITS_POOL.size()]))
-	var has_armor: bool = bool(saved_dict.get("has_armor", false))
-	var has_rifle: bool = bool(saved_dict.get("has_rifle", false))
-
-	pawn.set_meta("trait", trait_str)
-	pawn.set_meta("hp", float(saved_dict.get("hp", 100.0)))
-	pawn.set_meta("mood", float(saved_dict.get("mood", 85.0)))
-	pawn.set_meta("hunger", float(saved_dict.get("hunger", 100.0)))
-	pawn.set_meta("energy", float(saved_dict.get("energy", 100.0)))
-	pawn.set_meta("skill_work", int(saved_dict.get("skill_work", randi_range(3, 7))))
-	pawn.set_meta("skill_combat", int(saved_dict.get("skill_combat", randi_range(2, 6))))
-	pawn.set_meta("has_armor", has_armor)
-	pawn.set_meta("has_rifle", has_rifle)
-
-	var body: ColorRect = ColorRect.new()
-	body.name = "BodyRect"
-	body.size = Vector2(18, 22)
-	body.position = Vector2(-9, -6)
-	body.color = Color(0.28, 0.52, 0.85) if has_armor else Color(0.82, 0.86, 0.92)
-	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pawn.add_child(body)
-
-	var head: ColorRect = ColorRect.new()
-	head.size = Vector2(14, 14)
-	head.position = Vector2(-7, -18)
-	head.color = Color(0.95, 0.78, 0.65)
-	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pawn.add_child(head)
-
-	var lbl: Label = Label.new()
-	lbl.name = "NameLabel"
-	lbl.text = p_name
-	lbl.position = Vector2(-42, -52)
-	lbl.add_theme_font_size_override("font_size", 12)
-	
+		biome = str(tile_info.get(
