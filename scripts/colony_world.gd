@@ -552,4 +552,4 @@ func _generate_local_map() -> void:
 		ty = int(tile_info.get("y", 0))
 		rock_density = float(tile_info.get("rock_density", 0.22))
 		tree_density = float(tile_info.get("tree_density", 0.16))
-		biome = str(tile_info.get(
+		biome = str(tile_info.get))
