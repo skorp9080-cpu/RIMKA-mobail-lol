@@ -16,10 +16,15 @@ var item_textures: Dictionary = {}
 
 var work_orders: Array = []
 
-var wood: int = 200
-var steel: int = 140
-var stone: int = 120
-var food: int = 80
+var wood: int = 240
+var steel: int = 160
+var stone: int = 140
+var food: int = 90
+var meds: int = 12
+var components: int = 8
+var stored_power_wh: float = 400.0
+var trader_available: bool = false
+var turret_cooldown: float = 0.0
 
 var hud_layer: CanvasLayer
 var selection_ring: Line2D
@@ -29,7 +34,7 @@ var category_buttons: Dictionary = {}
 var items_hbox: HBoxContainer
 var btn_cancel: Button
 
-var categories_order: PackedStringArray = PackedStringArray(["orders", "farm", "walls", "floors", "furniture", "workbenches", "power"])
+var categories_order: PackedStringArray = PackedStringArray(["orders", "farm", "walls", "floors", "furniture", "workbenches", "power", "research", "trade"])
 var category_titles: Dictionary = {
 	"orders": "Накази",
 	"farm": "Ферма",
@@ -37,8 +42,16 @@ var category_titles: Dictionary = {
 	"floors": "Підлога",
 	"furniture": "Меблі",
 	"workbenches": "Верстаки",
-	"power": "Енергія"
+	"power": "Енергія",
+	"research": "Наука",
+	"trade": "Торгівля"
 }
+
+var tech_catalog: Array = [
+	{"id": "electricity", "name": "Електрика", "cost": 100.0},
+	{"id": "turrets", "name": "Авто-турелі", "cost": 160.0},
+	{"id": "hydroponics", "name": "Гідропоніка", "cost": 220.0}
+]
 
 var build_catalog: Dictionary = {
 	"orders": [
@@ -49,6 +62,7 @@ var build_catalog: Dictionary = {
 	],
 	"farm": [
 		{"id": "farm_potato", "name": "Грядка картоплі", "wood": 5, "steel": 0, "stone": 0, "is_floor": false},
+		{"id": "hydro_basin", "name": "Гідропоніка", "wood": 0, "steel": 30, "stone": 0, "is_floor": false, "req_tech": "hydroponics"},
 		{"id": "campfire", "name": "Багаття", "wood": 20, "steel": 0, "stone": 5, "is_floor": false}
 	],
 	"walls": [
@@ -63,18 +77,21 @@ var build_catalog: Dictionary = {
 	],
 	"furniture": [
 		{"id": "bed", "name": "Ліжко", "wood": 25, "steel": 0, "stone": 0, "is_floor": false},
+		{"id": "med_bed", "name": "Мед. ліжко", "wood": 10, "steel": 25, "stone": 0, "is_floor": false},
 		{"id": "table", "name": "Стіл", "wood": 15, "steel": 0, "stone": 0, "is_floor": false},
 		{"id": "storage", "name": "Склад", "wood": 15, "steel": 10, "stone": 0, "is_floor": false}
 	],
 	"workbenches": [
+		{"id": "bench_research", "name": "Стіл науки", "wood": 25, "steel": 10, "stone": 0, "is_floor": false},
 		{"id": "bench_wood", "name": "Верстак", "wood": 30, "steel": 0, "stone": 0, "is_floor": false},
 		{"id": "bench_forge", "name": "Кузня", "wood": 10, "steel": 25, "stone": 15, "is_floor": false},
 		{"id": "bench_stove", "name": "Плита", "wood": 15, "steel": 20, "stone": 0, "is_floor": false}
 	],
 	"power": [
-		{"id": "solar", "name": "Сон. панель", "wood": 0, "steel": 25, "stone": 0, "is_floor": false},
-		{"id": "wind", "name": "Вітряк", "wood": 15, "steel": 30, "stone": 0, "is_floor": false},
-		{"id": "battery", "name": "Акумулятор", "wood": 0, "steel": 20, "stone": 0, "is_floor": false}
+		{"id": "solar", "name": "Сон. панель", "wood": 0, "steel": 25, "stone": 0, "is_floor": false, "req_tech": "electricity"},
+		{"id": "wind", "name": "Вітряк", "wood": 15, "steel": 30, "stone": 0, "is_floor": false, "req_tech": "electricity"},
+		{"id": "battery", "name": "Акумулятор", "wood": 0, "steel": 20, "stone": 0, "is_floor": false, "req_tech": "electricity"},
+		{"id": "turret", "name": "Авто-турель", "wood": 0, "steel": 45, "stone": 0, "is_floor": false, "req_tech": "turrets"}
 	]
 }
 
@@ -91,6 +108,32 @@ func _is_colony_scene() -> bool:
 		return false
 	return scene.name != "MainMenu" and not scene.scene_file_path.ends_with("MainMenu.tscn")
 
+func notify_event(text_msg: String) -> void:
+	if status_label != null:
+		status_label.text = text_msg
+
+func grant_drop_pod() -> void:
+	wood += 60
+	steel += 45
+	food += 35
+	meds += 4
+	components += 2
+	_refresh_resource_bar()
+	notify_event("Подія: Вантажні капсули! (+60 дер, +45 сталі, +35 їжі, +4 мед, +2 комп)")
+
+func enable_trader() -> void:
+	trader_available = true
+	notify_event("Подія: Прибув торговий караван! Відкрийте вкладку «Торгівля»")
+	if current_category == "trade":
+		_rebuild_item_buttons()
+
+func reward_raid_victory() -> void:
+	steel += 25
+	meds += 2
+	components += 1
+	_refresh_resource_bar()
+	notify_event("Рейдера переможено! Трофеї: +25 сталі, +2 мед., +1 комп.")
+
 func _physics_process(delta: float) -> void:
 	var in_colony: bool = _is_colony_scene()
 	if hud_layer != null:
@@ -105,7 +148,9 @@ func _physics_process(delta: float) -> void:
 
 	var sim_delta: float = delta * GameState.time_speed
 	if sim_delta > 0.0:
-		_update_colonist_needs(sim_delta)
+		_update_power_and_turrets(sim_delta)
+		_update_research(sim_delta)
+		_update_colonist_simulation(sim_delta)
 		_update_crops(sim_delta)
 
 		for pawn_key in colonist_targets.keys():
@@ -130,48 +175,156 @@ func _physics_process(delta: float) -> void:
 		selected_colonist = null
 		selection_ring.visible = false
 
-func _update_colonist_needs(sim_delta: float) -> void:
+func _update_power_and_turrets(sim_delta: float) -> void:
+	if GameState.active_weather_event == "Сонячний спалах":
+		stored_power_wh = 0.0
+		return
+
+	var net_gen: float = 0.0
+	var turret_nodes: Array = []
+	var is_day: bool = GameState.game_time_hours >= 6.0 and GameState.game_time_hours < 20.0
+
+	for cell_key in placed_cells.keys():
+		var node: Control = placed_cells[cell_key] as Control
+		if node == null or not is_instance_valid(node):
+			continue
+		var b_id: String = str(node.get_meta("build_id", ""))
+		if b_id == "solar" and is_day:
+			net_gen += 35.0
+		elif b_id == "wind":
+			net_gen += 28.0
+		elif b_id == "turret":
+			net_gen -= 15.0
+			turret_nodes.append(node)
+		elif b_id == "hydro_basin":
+			net_gen -= 12.0
+
+	stored_power_wh = clampf(stored_power_wh + net_gen * sim_delta, 0.0, 2000.0)
+
+	if stored_power_wh > 10.0 and not turret_nodes.is_empty():
+		turret_cooldown -= sim_delta
+		if turret_cooldown <= 0.0:
+			var enemies: Array = get_tree().get_nodes_in_group("raiders")
+			if not enemies.is_empty():
+				turret_cooldown = 1.2
+				for t_i: int in range(turret_nodes.size()):
+					var t_ctrl: Control = turret_nodes[t_i] as Control
+					var t_pos: Vector2 = t_ctrl.position + t_ctrl.size * 0.5
+					for e_i: int in range(enemies.size()):
+						var enemy: Node2D = enemies[e_i] as Node2D
+						if enemy != null and is_instance_valid(enemy) and t_pos.distance_to(enemy.global_position) <= 260.0:
+							var e_hp: float = float(enemy.get_meta("hp", 100.0)) - 22.0
+							enemy.set_meta("hp", e_hp)
+							break
+
+func _update_research(sim_delta: float) -> void:
+	if GameState.active_research_id == "":
+		return
+	var benches: int = 0
+	for cell_key in placed_cells.keys():
+		var node: Control = placed_cells[cell_key] as Control
+		if node != null and is_instance_valid(node) and str(node.get_meta("build_id", "")) == "bench_research":
+			benches += 1
+	var rate: float = 1.2 + float(benches) * 3.5
+	GameState.research_progress += sim_delta * rate
+
+	for i: int in range(tech_catalog.size()):
+		var tech: Dictionary = tech_catalog[i]
+		if str(tech["id"]) == GameState.active_research_id:
+			var req_cost: float = float(tech["cost"])
+			if GameState.research_progress >= req_cost:
+				GameState.research_progress = 0.0
+				if not GameState.unlocked_techs.has(GameState.active_research_id):
+					GameState.unlocked_techs.append(GameState.active_research_id)
+				notify_event("Дослідження завершено: %s!" % str(tech["name"]))
+				GameState.active_research_id = ""
+				if current_category == "research":
+					_rebuild_item_buttons()
+			break
+
+func _update_colonist_simulation(sim_delta: float) -> void:
 	var all_pawns: Array = _get_all_colonists()
 	for i: int in range(all_pawns.size()):
 		var pawn: Node2D = all_pawns[i] as Node2D
 		if pawn == null or not is_instance_valid(pawn):
 			continue
-		var hunger: float = maxf(0.0, float(pawn.get_meta("hunger", 100.0)) - sim_delta * 0.65)
-		var energy: float = float(pawn.get_meta("energy", 100.0))
 
+		var trait_name: String = str(pawn.get_meta("trait", "Оптиміст"))
+		var hp: float = float(pawn.get_meta("hp", 100.0))
+		var hunger: float = maxf(0.0, float(pawn.get_meta("hunger", 100.0)) - sim_delta * 0.60)
+		var energy: float = float(pawn.get_meta("energy", 100.0))
+		var mood: float = float(pawn.get_meta("mood", 85.0))
+
+		# Лікування медикаментами при пораненні
+		if hp < 75.0 and meds > 0:
+			meds -= 1
+			hp = minf(100.0, hp + 40.0)
+			_refresh_resource_bar()
+			notify_event("%s перев'язав рани (-1 медикамент)" % pawn.name)
+
+		# Авто-сон на ліжках
 		var bed_pos: Vector2 = _find_nearest_bed(pawn.global_position)
 		var is_night: bool = GameState.game_time_hours >= 22.0 or GameState.game_time_hours < 6.0
+		if trait_name == "Нічна сова":
+			is_night = GameState.game_time_hours >= 4.0 and GameState.game_time_hours < 11.0
+
 		if (energy < 25.0 or (is_night and energy < 75.0)) and bed_pos != Vector2.ZERO and not colonist_targets.has(pawn):
 			if pawn.global_position.distance_to(bed_pos) > 12.0:
 				pawn.global_position += (bed_pos - pawn.global_position).normalized() * 90.0 * sim_delta
 			else:
-				energy = minf(100.0, energy + sim_delta * 8.5)
+				energy = minf(100.0, energy + sim_delta * 9.0)
+				hp = minf(100.0, hp + sim_delta * 1.5)
 		else:
-			energy = maxf(0.0, energy - sim_delta * 0.50)
+			energy = maxf(0.0, energy - sim_delta * 0.48)
 
+		# Харчування
 		if hunger < 25.0 and food >= 10:
 			food -= 10
 			hunger = minf(100.0, hunger + 65.0)
 			_refresh_resource_bar()
 
+		# Розрахунок настрою (Mood)
+		var target_mood: float = 75.0
+		if trait_name == "Оптиміст":
+			target_mood += 12.0
+		elif trait_name == "Песиміст":
+			target_mood -= 12.0
+		if hunger < 20.0:
+			target_mood -= 25.0
+		if energy < 20.0:
+			target_mood -= 20.0
+		if GameState.ambient_temp < 5 or GameState.ambient_temp > 34:
+			target_mood -= 12.0
+		mood = move_toward(mood, clampf(target_mood, 5.0, 100.0), sim_delta * 2.5)
+
+		# Психічний зрив при низькому настрої
+		if mood < 18.0 and randf() < sim_delta * 0.08:
+			colonist_targets[pawn] = pawn.global_position + Vector2(randf_range(-160, 160), randf_range(-160, 160))
+			mood = 45.0
+			notify_event("Психічний зрив: %s блукає в істериці!" % pawn.name)
+
+		pawn.set_meta("hp", hp)
 		pawn.set_meta("hunger", hunger)
 		pawn.set_meta("energy", energy)
+		pawn.set_meta("mood", mood)
 
 		var lbl: Label = pawn.get_node_or_null("NameLabel") as Label
 		if lbl != null:
-			lbl.text = "%s\nЇжа:%d%% Сон:%d%%" % [pawn.name, int(hunger), int(energy)]
+			lbl.text = "%s (%s)\nХП:%d%% Настрій:%d%%\nЇжа:%d%% Сон:%d%%" % [pawn.name, trait_name, int(hp), int(mood), int(hunger), int(energy)]
 
 func _find_nearest_bed(from_pos: Vector2) -> Vector2:
 	var best_pos: Vector2 = Vector2.ZERO
 	var best_dist: float = 999999.0
 	for cell_key in placed_cells.keys():
 		var node: Control = placed_cells[cell_key] as Control
-		if node != null and is_instance_valid(node) and str(node.get_meta("build_id", "")) == "bed":
-			var center: Vector2 = node.position + node.size * 0.5
-			var d: float = from_pos.distance_to(center)
-			if d < best_dist:
-				best_dist = d
-				best_pos = center
+		if node != null and is_instance_valid(node):
+			var bid: String = str(node.get_meta("build_id", ""))
+			if bid == "bed" or bid == "med_bed":
+				var center: Vector2 = node.position + node.size * 0.5
+				var d: float = from_pos.distance_to(center)
+				if d < best_dist:
+					best_dist = d
+					best_pos = center
 	return best_pos
 
 func _update_crops(sim_delta: float) -> void:
@@ -180,12 +333,17 @@ func _update_crops(sim_delta: float) -> void:
 		var block: TextureRect = plot.get("node", null) as TextureRect
 		if block == null or not is_instance_valid(block):
 			continue
-		var growth: float = float(plot.get("growth", 0.0)) + sim_delta * 0.045
+		var is_hydro: bool = str(block.get_meta("build_id", "")) == "hydro_basin"
+		if is_hydro and stored_power_wh <= 5.0:
+			continue
+		var growth_rate: float = 0.095 if is_hydro else 0.045
+		var growth: float = float(plot.get("growth", 0.0)) + sim_delta * growth_rate
 		if growth >= 1.0:
 			growth = 0.0
-			food += 30
+			var yield_food: int = 45 if is_hydro else 30
+			food += yield_food
 			_refresh_resource_bar()
-			status_label.text = "Зібрано врожай картоплі (+30 їжі)!"
+			notify_event("Зібрано врожай (+%d їжі)!" % yield_food)
 		plot["growth"] = growth
 		block.modulate = Color(0.65, 0.55, 0.45).lerp(Color(0.35, 0.95, 0.35), growth)
 
@@ -234,13 +392,17 @@ func _process_work_orders(sim_delta: float) -> void:
 			worker.global_position += diff.normalized() * 105.0 * sim_delta
 		else:
 			var o_type: String = str(order["type"])
-			var speed: float = 0.55 if o_type == "order_chop" else (0.38 if o_type == "order_mine" else 0.75)
+			var w_skill: float = float(worker.get_meta("skill_work", 4))
+			var trait_mult: float = 1.25 if str(worker.get_meta("trait", "")) == "Працьовитий" else 1.0
+			var base_spd: float = 0.50 if o_type == "order_chop" else (0.35 if o_type == "order_mine" else 0.72)
+			var speed: float = base_spd * (1.0 + w_skill * 0.06) * trait_mult
 			var prog: float = float(order.get("progress", 0.0)) + sim_delta * speed
 			order["progress"] = prog
 			var bar_fill: ColorRect = order.get("bar_fill", null) as ColorRect
 			if bar_fill != null and is_instance_valid(bar_fill):
 				bar_fill.size.x = clampf(prog, 0.0, 1.0) * (TILE_SIZE - 4.0)
 			if prog >= 1.0:
+				worker.set_meta("skill_work", mini(20, int(w_skill) + 1))
 				completed.append(order)
 
 	for i: int in range(completed.size()):
@@ -262,7 +424,7 @@ func _finish_work_order(order: Dictionary) -> void:
 			if target_node != null and is_instance_valid(target_node):
 				target_node.queue_free()
 			wood += 25
-			status_label.text = "Дерево зрубано (+25 дер.)"
+			notify_event("Дерево зрубано (+25 дер.)")
 		"order_mine":
 			if target_node != null and is_instance_valid(target_node):
 				target_node.queue_free()
@@ -271,7 +433,9 @@ func _finish_work_order(order: Dictionary) -> void:
 				ridge.queue_free()
 			stone += 20
 			steel += 15
-			status_label.text = "Скелю видобуто (+20 кам., +15 сталі)"
+			if randf() < 0.25:
+				components += 1
+			notify_event("Скелю видобуто (+20 кам., +15 сталі)")
 		"order_harvest":
 			var gain: int = 12
 			if target_node != null and is_instance_valid(target_node):
@@ -279,7 +443,7 @@ func _finish_work_order(order: Dictionary) -> void:
 					gain = 16
 				target_node.queue_free()
 			food += gain
-			status_label.text = "Зібрано лісовий врожай (+%d їжі)" % gain
+			notify_event("Зібрано лісовий врожай (+%d їжі)" % gain)
 		"order_deconstruct":
 			if placed_cells.has(cell):
 				var b_node: Node = placed_cells[cell] as Node
@@ -293,7 +457,7 @@ func _finish_work_order(order: Dictionary) -> void:
 				_refund_resources(f_id)
 				f_node.queue_free()
 				placed_floors.erase(cell)
-			status_label.text = "Об'єкт розібрано!"
+			notify_event("Об'єкт розібрано!")
 	_refresh_resource_bar()
 
 func _refund_resources(item_id: String) -> void:
@@ -329,12 +493,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	var clicked_pawn: Node2D = _find_colonist_near(world_pos)
 	if clicked_pawn != null:
 		selected_colonist = clicked_pawn
-		status_label.text = "Вибрано: %s — тапніть по землі для руху" % clicked_pawn.name
+		var tr_str: String = str(clicked_pawn.get_meta("trait", ""))
+		var sk_w: int = int(clicked_pawn.get_meta("skill_work", 4))
+		var sk_c: int = int(clicked_pawn.get_meta("skill_combat", 3))
+		notify_event("%s [%s] | Праця:%d Бій:%d — тапніть по землі для руху" % [clicked_pawn.name, tr_str, sk_w, sk_c])
 		return
 
 	if is_instance_valid(selected_colonist):
 		colonist_targets[selected_colonist] = world_pos
-		status_label.text = "%s прямує до точки..." % selected_colonist.name
+		notify_event("%s прямує до точки..." % selected_colonist.name)
 
 func _try_assign_order(world_pos: Vector2) -> void:
 	var cell: Vector2i = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
@@ -343,7 +510,7 @@ func _try_assign_order(world_pos: Vector2) -> void:
 	for i: int in range(work_orders.size()):
 		var existing: Dictionary = work_orders[i]
 		if existing["cell"] == cell:
-			status_label.text = "На цю клітинку вже призначено наказ"
+			notify_event("На цю клітинку вже призначено наказ")
 			return
 
 	var scene: Node = get_tree().current_scene
@@ -353,7 +520,7 @@ func _try_assign_order(world_pos: Vector2) -> void:
 	if selected_build_id == "order_chop":
 		var tree_node: Control = _find_map_object_at_cell(scene, cell, "tree")
 		if tree_node == null:
-			status_label.text = "Тут немає дерева! Тапніть по дереву"
+			notify_event("Тут немає дерева! Тапніть по дереву")
 			return
 		var marker_data: Dictionary = _create_order_marker(cell, "order_chop")
 		work_orders.append({
@@ -366,195 +533,11 @@ func _try_assign_order(world_pos: Vector2) -> void:
 			"worker": null,
 			"progress": 0.0
 		})
-		status_label.text = "Наказ: зрубати дерево (у черзі: %d)" % work_orders.size()
+		notify_event("Наказ: зрубати дерево (у черзі: %d)" % work_orders.size())
 
 	elif selected_build_id == "order_mine":
 		var rock_node: Control = _find_map_object_at_cell(scene, cell, "rock")
 		if rock_node == null:
-			status_label.text = "Тут немає скелі! Тапніть по сірій скелі"
+			notify_event("Тут немає скелі! Тапніть по сірій скелі")
 			return
-		var ridge_node: Control = _find_map_object_at_cell(scene, cell, "ridge")
-		var marker_data: Dictionary = _create_order_marker(cell, "order_mine")
-		work_orders.append({
-			"type": "order_mine",
-			"cell": cell,
-			"world_pos": cell_center,
-			"target_node": rock_node,
-			"extra_node": ridge_node,
-			"marker": marker_data["root"],
-			"bar_fill": marker_data["fill"],
-			"worker": null,
-			"progress": 0.0
-		})
-		status_label.text = "Наказ: копати скелю (у черзі: %d)" % work_orders.size()
-
-	elif selected_build_id == "order_harvest":
-		var forage_node: Control = _find_map_object_at_cell(scene, cell, "forage")
-		if forage_node == null:
-			status_label.text = "Тут немає ягід чи грибів!"
-			return
-		var marker_data: Dictionary = _create_order_marker(cell, "order_harvest")
-		work_orders.append({
-			"type": "order_harvest",
-			"cell": cell,
-			"world_pos": cell_center,
-			"target_node": forage_node,
-			"marker": marker_data["root"],
-			"bar_fill": marker_data["fill"],
-			"worker": null,
-			"progress": 0.0
-		})
-		status_label.text = "Наказ: зібрати ягоди/гриби (у черзі: %d)" % work_orders.size()
-
-	elif selected_build_id == "order_deconstruct":
-		if not placed_cells.has(cell) and not placed_floors.has(cell):
-			status_label.text = "Тут немає збудованого об'єкта"
-			return
-		var marker_data: Dictionary = _create_order_marker(cell, "order_deconstruct")
-		work_orders.append({
-			"type": "order_deconstruct",
-			"cell": cell,
-			"world_pos": cell_center,
-			"target_node": null,
-			"marker": marker_data["root"],
-			"bar_fill": marker_data["fill"],
-			"worker": null,
-			"progress": 0.0
-		})
-		status_label.text = "Наказ: розібрати будівлю (у черзі: %d)" % work_orders.size()
-
-func _find_map_object_at_cell(root: Node, cell: Vector2i, kind: String) -> Control:
-	var cell_rect: Rect2 = Rect2(float(cell.x) * TILE_SIZE, float(cell.y) * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-	var children: Array = root.get_children()
-	for i: int in range(children.size()):
-		var child: Node = children[i]
-		if child is Control:
-			var cr: Control = child as Control
-			if not cell_rect.has_point(cr.position + cr.size * 0.5):
-				continue
-			if kind == "tree" and cr.name.begins_with("Tree_"):
-				return cr
-			elif kind == "forage" and (cr.name.begins_with("Berry_") or cr.name.begins_with("Mushroom_")):
-				return cr
-			elif kind == "rock" and cr.name.begins_with("Rock_"):
-				return cr
-			elif kind == "ridge" and cr.size.x == TILE_SIZE - 6.0 and cr.size.y == TILE_SIZE - 8.0:
-				return cr
-	return null
-
-func _create_order_marker(cell: Vector2i, tex_id: String) -> Dictionary:
-	var marker: TextureRect = TextureRect.new()
-	marker.texture = item_textures.get(tex_id) as Texture2D
-	marker.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	marker.stretch_mode = TextureRect.STRETCH_SCALE
-	marker.size = Vector2(TILE_SIZE, TILE_SIZE)
-	marker.position = Vector2(float(cell.x) * TILE_SIZE, float(cell.y) * TILE_SIZE)
-	marker.z_index = 20
-	marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var bar_bg: ColorRect = ColorRect.new()
-	bar_bg.size = Vector2(TILE_SIZE - 4.0, 5.0)
-	bar_bg.position = Vector2(2.0, -7.0)
-	bar_bg.color = Color(0.1, 0.1, 0.1, 0.85)
-	bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	marker.add_child(bar_bg)
-
-	var bar_fill: ColorRect = ColorRect.new()
-	bar_fill.size = Vector2(0.0, 5.0)
-	bar_fill.position = Vector2(2.0, -7.0)
-	bar_fill.color = Color(0.25, 0.95, 0.35)
-	bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	marker.add_child(bar_fill)
-
-	get_tree().current_scene.add_child(marker)
-	return {"root": marker, "fill": bar_fill}
-
-func _get_all_colonists() -> Array:
-	var candidates: Array = get_tree().get_nodes_in_group("colonists")
-	if candidates.is_empty():
-		candidates = _collect_scene_pawns(get_tree().current_scene)
-	return candidates
-
-func _find_colonist_near(pos: Vector2) -> Node2D:
-	var best_pawn: Node2D = null
-	var best_dist: float = SELECT_RADIUS
-	var all_pawns: Array = _get_all_colonists()
-
-	for i: int in range(all_pawns.size()):
-		var pawn_node: Node2D = all_pawns[i] as Node2D
-		if pawn_node != null and pawn_node != self:
-			var d: float = pawn_node.global_position.distance_to(pos)
-			if d <= best_dist:
-				best_dist = d
-				best_pawn = pawn_node
-	return best_pawn
-
-func _collect_scene_pawns(root: Node) -> Array:
-	var result: Array = []
-	if root == null:
-		return result
-	var children: Array = root.get_children()
-	for i: int in range(children.size()):
-		var child: Node = children[i]
-		if child is Node2D and (child.name == "Олекса" or child.name == "Соломія" or child.name == "Богдан" or child.has_node("NameLabel")):
-			result.append(child)
-		result.append_array(_collect_scene_pawns(child))
-	return result
-
-func _find_item_def(item_id: String) -> Dictionary:
-	for cat in build_catalog.keys():
-		var list: Array = build_catalog[cat]
-		for i: int in range(list.size()):
-			var entry: Dictionary = list[i]
-			if str(entry["id"]) == item_id:
-				return entry
-	return {}
-
-func _try_place_building(world_pos: Vector2) -> void:
-	var item_def: Dictionary = _find_item_def(selected_build_id)
-	if item_def.is_empty():
-		return
-
-	var cell: Vector2i = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
-	var is_floor: bool = bool(item_def.get("is_floor", false))
-
-	if is_floor and placed_floors.has(cell):
-		status_label.text = "Тут уже є підлога"
-		return
-	if not is_floor and placed_cells.has(cell):
-		status_label.text = "Ця клітинка вже зайнята"
-		return
-
-	var c_wood: int = int(item_def["wood"])
-	var c_steel: int = int(item_def["steel"])
-	var c_stone: int = int(item_def["stone"])
-
-	if wood < c_wood or steel < c_steel or stone < c_stone:
-		status_label.text = "Не вистачає ресурсів!"
-		return
-
-	wood -= c_wood
-	steel -= c_steel
-	stone -= c_stone
-	_refresh_resource_bar()
-
-	_spawn_building_block(cell, selected_build_id, is_floor)
-	status_label.text = "Збудовано: %s" % str(item_def["name"])
-
-func _spawn_building_block(cell: Vector2i, build_id: String, is_floor: bool) -> void:
-	var block: TextureRect = TextureRect.new()
-	block.texture = item_textures.get(build_id) as Texture2D
-	block.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	block.stretch_mode = TextureRect.STRETCH_SCALE
-	block.size = Vector2(TILE_SIZE, TILE_SIZE)
-	block.position = Vector2(float(cell.x) * TILE_SIZE, float(cell.y) * TILE_SIZE)
-	block.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	block.set_meta("build_id", build_id)
-	if is_floor:
-		block.z_index = -1
-		placed_floors[cell] = block
-	else:
-		block.z_index = 2
-		placed_cells[cell] = block
-		if build_id == "farm_potato":
-			crop_plo
+		var ridge_node: Control = _find_map_object_at_c
