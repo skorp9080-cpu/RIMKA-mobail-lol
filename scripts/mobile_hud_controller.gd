@@ -1,243 +1,330 @@
-extends Node2D
+extends Control
 
-const TILE_SIZE: float = 32.0
-const SELECT_RADIUS: float = 36.0
+const MAP_COLS: int = 24
+const MAP_ROWS: int = 14
 
-enum BuildMode { NONE, WALL, BED, STORAGE }
+var planet_cells: Array = []
+var selected_coords: Vector2i = Vector2i(10, 6)
 
-var current_build_mode: BuildMode = BuildMode.NONE
-var selected_colonist: Node2D = null
-var colonist_targets: Dictionary = {}
-var placed_cells: Dictionary = {}
-
-var wood: int = 200
-var steel: int = 140
-
-var hud_layer: CanvasLayer
-var selection_ring: Line2D
-var status_label: Label
-var btn_wall: Button
-var btn_bed: Button
-var btn_storage: Button
-var btn_cancel: Button
+var menu_panel: VBoxContainer
+var planet_panel: Control
+var settings_panel: PanelContainer
+var btn_load: Button
+var info_label: Label
+var seed_input: LineEdit
+var grid_container: GridContainer
+var cell_buttons: Dictionary = {}
 
 func _ready() -> void:
-	_create_selection_ring()
-	_build_mobile_hud()
-	_refresh_buttons()
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+	_build_background()
+	_build_main_menu()
+	_build_settings_panel()
+	_build_planet_screen()
+	_show_screen("menu")
 
-func _is_colony_scene() -> bool:
-	var scene: Node = get_tree().current_scene
-	return scene != null and scene.name == "Main"
+func _build_background() -> void:
+	var bg: ColorRect = ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.08, 0.10, 0.13)
+	add_child(bg)
 
-func _physics_process(delta: float) -> void:
-	var in_colony: bool = _is_colony_scene()
-	if hud_layer != null:
-		hud_layer.visible = in_colony
+func _build_main_menu() -> void:
+	menu_panel = VBoxContainer.new()
+	menu_panel.set_anchors_preset(Control.PRESET_CENTER)
+	menu_panel.offset_left = -220
+	menu_panel.offset_right = 220
+	menu_panel.offset_top = -180
+	menu_panel.offset_bottom = 180
+	menu_panel.add_theme_constant_override("separation", 16)
+	add_child(menu_panel)
 
-	if not in_colony:
-		if selection_ring != null:
-			selection_ring.visible = false
+	var title: Label = Label.new()
+	title.text = "RIMWORLD COLONY"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 36)
+	menu_panel.add_child(title)
+
+	var subtitle: Label = Label.new()
+	subtitle.text = "Мобільний симулятор виживання колонії"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.add_theme_font_size_override("font_size", 18)
+	subtitle.modulate = Color(0.75, 0.82, 0.88)
+	menu_panel.add_child(subtitle)
+
+	var btn_new: Button = _make_button("Нова гра", func(): _open_planet_generator())
+	btn_load = _make_button("Завантажити збереження", func(): _on_load_pressed())
+	var btn_settings: Button = _make_button("Налаштування", func(): _show_screen("settings"))
+
+	menu_panel.add_child(btn_new)
+	menu_panel.add_child(btn_load)
+	menu_panel.add_child(btn_settings)
+
+func _build_settings_panel() -> void:
+	settings_panel = PanelContainer.new()
+	settings_panel.set_anchors_preset(Control.PRESET_CENTER)
+	settings_panel.offset_left = -240
+	settings_panel.offset_right = 240
+	settings_panel.offset_top = -170
+	settings_panel.offset_bottom = 170
+	add_child(settings_panel)
+
+	var box: VBoxContainer = VBoxContainer.new()
+	box.add_theme_constant_override("separation", 16)
+	settings_panel.add_child(box)
+
+	var header: Label = Label.new()
+	header.text = "НАЛАШТУВАННЯ"
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.add_theme_font_size_override("font_size", 26)
+	box.add_child(header)
+
+	var autosave_chk: CheckButton = CheckButton.new()
+	autosave_chk.text = "Автозбереження колонії"
+	autosave_chk.button_pressed = bool(GameState.settings["autosave"])
+	autosave_chk.add_theme_font_size_override("font_size", 20)
+	autosave_chk.toggled.connect(func(val: bool): GameState.settings["autosave"] = val)
+	box.add_child(autosave_chk)
+
+	var speed_label: Label = Label.new()
+	speed_label.text = "Швидкість перетягування камери: 1.0x"
+	speed_label.add_theme_font_size_override("font_size", 18)
+	box.add_child(speed_label)
+
+	var speed_slider: HSlider = HSlider.new()
+	speed_slider.min_value = 0.5
+	speed_slider.max_value = 2.0
+	speed_slider.step = 0.1
+	speed_slider.value = float(GameState.settings["camera_speed"])
+	speed_slider.value_changed.connect(func(v: float):
+		GameState.settings["camera_speed"] = v
+		speed_label.text = "Швидкість перетягування камери: %.1fx" % v
+	)
+	box.add_child(speed_slider)
+
+	var btn_back: Button = _make_button("Назад до меню", func(): _show_screen("menu"))
+	box.add_child(btn_back)
+
+func _build_planet_screen() -> void:
+	planet_panel = Control.new()
+	planet_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(planet_panel)
+
+	var top_bar: HBoxContainer = HBoxContainer.new()
+	top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top_bar.offset_left = 16
+	top_bar.offset_right = -16
+	top_bar.offset_top = 12
+	top_bar.offset_bottom = 64
+	top_bar.add_theme_constant_override("separation", 10)
+	planet_panel.add_child(top_bar)
+
+	var btn_back: Button = Button.new()
+	btn_back.text = "← Меню"
+	btn_back.custom_minimum_size = Vector2(120, 48)
+	btn_back.pressed.connect(func(): _show_screen("menu"))
+	top_bar.add_child(btn_back)
+
+	seed_input = LineEdit.new()
+	seed_input.placeholder_text = "Сід планети..."
+	seed_input.text = str(GameState.planet_seed)
+	seed_input.custom_minimum_size = Vector2(200, 48)
+	top_bar.add_child(seed_input)
+
+	var btn_regen: Button = Button.new()
+	btn_regen.text = "Нова планета"
+	btn_regen.custom_minimum_size = Vector2(160, 48)
+	btn_regen.pressed.connect(func():
+		var new_seed: int = seed_input.text.hash() if not seed_input.text.is_valid_int() else int(seed_input.text)
+		if seed_input.text.strip_edges() == "":
+			new_seed = randi() % 999999
+			seed_input.text = str(new_seed)
+		_generate_planet(new_seed)
+	)
+	top_bar.add_child(btn_regen)
+
+	var btn_rand: Button = Button.new()
+	btn_rand.text = "Випадковий сід"
+	btn_rand.custom_minimum_size = Vector2(160, 48)
+	btn_rand.pressed.connect(func():
+		var r: int = randi_range(10000, 999999)
+		seed_input.text = str(r)
+		_generate_planet(r)
+	)
+	top_bar.add_child(btn_rand)
+
+	var map_frame: CenterContainer = CenterContainer.new()
+	map_frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	map_frame.offset_top = 72
+	map_frame.offset_bottom = -96
+	planet_panel.add_child(map_frame)
+
+	grid_container = GridContainer.new()
+	grid_container.columns = MAP_COLS
+	grid_container.add_theme_constant_override("h_separation", 2)
+	grid_container.add_theme_constant_override("v_separation", 2)
+	map_frame.add_child(grid_container)
+
+	for y in range(MAP_ROWS):
+		for x in range(MAP_COLS):
+			var c_btn: Button = Button.new()
+			c_btn.custom_minimum_size = Vector2(36, 32)
+			c_btn.text = ""
+			c_btn.add_theme_color_override("font_color", Color(0.1, 0.1, 0.1))
+			c_btn.add_theme_font_size_override("font_size", 15)
+			var coords: Vector2i = Vector2i(x, y)
+			c_btn.pressed.connect(func(): _select_planet_cell(coords))
+			grid_container.add_child(c_btn)
+			cell_buttons[coords] = c_btn
+
+	var bottom_bar: HBoxContainer = HBoxContainer.new()
+	bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bottom_bar.offset_left = 16
+	bottom_bar.offset_right = -16
+	bottom_bar.offset_top = -84
+	bottom_bar.offset_bottom = -12
+	bottom_bar.add_theme_constant_override("separation", 12)
+	planet_panel.add_child(bottom_bar)
+
+	info_label = Label.new()
+	info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info_label.add_theme_font_size_override("font_size", 18)
+	info_label.text = "Оберіть клітинку на карті планети"
+	bottom_bar.add_child(info_label)
+
+	var btn_land: Button = Button.new()
+	btn_land.text = "ВИСАДИТИ КОЛОНІЮ →"
+	btn_land.custom_minimum_size = Vector2(240, 62)
+	btn_land.add_theme_font_size_override("font_size", 19)
+	btn_land.pressed.connect(func(): _start_new_colony())
+	bottom_bar.add_child(btn_land)
+
+func _apply_cell_style(btn: Button, bg_color: Color, is_selected: bool) -> void:
+	var sb: StyleBoxFlat = StyleBoxFlat.new()
+	sb.bg_color = bg_color
+	sb.corner_radius_top_left = 3
+	sb.corner_radius_top_right = 3
+	sb.corner_radius_bottom_left = 3
+	sb.corner_radius_bottom_right = 3
+	if is_selected:
+		sb.border_width_left = 3
+		sb.border_width_right = 3
+		sb.border_width_top = 3
+		sb.border_width_bottom = 3
+		sb.border_color = Color(1.0, 0.95, 0.15)
+	btn.add_theme_stylebox_override("normal", sb)
+	btn.add_theme_stylebox_override("hover", sb)
+	btn.add_theme_stylebox_override("pressed", sb)
+	btn.add_theme_stylebox_override("focus", sb)
+
+func _open_planet_generator() -> void:
+	_show_screen("planet")
+	_generate_planet(GameState.planet_seed)
+
+func _generate_planet(seed_val: int) -> void:
+	GameState.planet_seed = seed_val
+	var noise: FastNoiseLite = FastNoiseLite.new()
+	noise.seed = seed_val
+	noise.frequency = 0.09
+
+	var rock_noise: FastNoiseLite = FastNoiseLite.new()
+	rock_noise.seed = seed_val + 777
+	rock_noise.frequency = 0.14
+
+	planet_cells.clear()
+	for y in range(MAP_ROWS):
+		var row: Array = []
+		for x in range(MAP_COLS):
+			var h: float = noise.get_noise_2d(float(x), float(y))
+			var r: float = (rock_noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
+			var lat: float = absf(float(y) - float(MAP_ROWS) * 0.5) / (float(MAP_ROWS) * 0.5)
+
+			var biome: String = "Помірний ліс"
+			var color: Color = Color(0.22, 0.78, 0.30)
+			var rock_density: float = 0.15
+			var tree_density: float = 0.18
+			var temp: int = int(24.0 - lat * 28.0)
+
+			if h < -0.22:
+				biome = "Океан (недоступно)"
+				color = Color(0.14, 0.48, 0.95)
+				rock_density = 0.0
+				tree_density = 0.0
+			elif r > 0.65 or h > 0.35:
+				biome = "Скелясті гори"
+				color = Color(0.68, 0.65, 0.62)
+				rock_density = 0.38
+				tree_density = 0.06
+				temp -= 6
+			elif lat > 0.72:
+				biome = "Холодна тайга"
+				color = Color(0.75, 0.90, 0.88)
+				rock_density = 0.20
+				tree_density = 0.14
+			elif lat < 0.25 and h < 0.05:
+				biome = "Посушливі скелі"
+				color = Color(0.95, 0.78, 0.28)
+				rock_density = 0.28
+				tree_density = 0.03
+				temp += 8
+
+			var cell_data: Dictionary = {
+				"x": x,
+				"y": y,
+				"biome": biome,
+				"color": color,
+				"rock_density": rock_density,
+				"tree_density": tree_density,
+				"temp": temp,
+				"landable": h >= -0.22
+			}
+			row.append(cell_data)
+
+			var btn: Button = cell_buttons[Vector2i(x, y)]
+			btn.text = "▲" if biome == "Скелясті гори" else ""
+			_apply_cell_style(btn, color, false)
+		planet_cells.append(row)
+
+	_select_planet_cell(selected_coords)
+
+func _select_planet_cell(coords: Vector2i) -> void:
+	selected_coords = coords
+	var data: Dictionary = planet_cells[coords.y][coords.x]
+	for key in cell_buttons.keys():
+		var b: Button = cell_buttons[key]
+		var d: Dictionary = planet_cells[key.y][key.x]
+		_apply_cell_style(b, d["color"], key == coords)
+
+	GameState.selected_tile = data
+	var rock_pct: int = int(float(data["rock_density"]) * 100.0)
+	var tree_pct: int = int(float(data["tree_density"]) * 100.0)
+	info_label.text = "Координати [%d, %d] • %s • Скелі: %d%% • Дерева: %d%% • Темп: %d°C" % [
+		coords.x, coords.y, data["biome"], rock_pct, tree_pct, int(data["temp"])
+	]
+
+func _start_new_colony() -> void:
+	var data: Dictionary = GameState.selected_tile
+	if not bool(data.get("landable", true)):
+		info_label.text = "Неможливо висадитися в океан! Оберіть сушу або скелі."
 		return
+	GameState.is_loading_save = false
+	get_tree().change_scene_to_file("res://scenes/Main.tscn")
 
-	for pawn in colonist_targets.keys():
-		if not is_instance_valid(pawn):
-			colonist_targets.erase(pawn)
-			continue
-		var pawn_node: Node2D = pawn as Node2D
-		var target: Vector2 = colonist_targets[pawn]
-		var to_target: Vector2 = target - pawn_node.global_position
-		if to_target.length() <= 4.0:
-			pawn_node.global_position = target
-			colonist_targets.erase(pawn)
-		else:
-			pawn_node.global_position += to_target.normalized() * 110.0 * delta
+func _on_load_pressed() -> void:
+	if GameState.load_game():
+		get_tree().change_scene_to_file("res://scenes/Main.tscn")
 
-	if is_instance_valid(selected_colonist):
-		selection_ring.visible = true
-		selection_ring.global_position = selected_colonist.global_position
-	else:
-		selected_colonist = null
-		selection_ring.visible = false
+func _show_screen(screen_name: String) -> void:
+	menu_panel.visible = (screen_name == "menu")
+	settings_panel.visible = (screen_name == "settings")
+	planet_panel.visible = (screen_name == "planet")
+	if screen_name == "menu":
+		btn_load.disabled = not GameState.has_save()
 
-func _unhandled_input(event: InputEvent) -> void:
-	if not _is_colony_scene():
-		return
-
-	var tapped: bool = false
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		tapped = true
-	elif event is InputEventScreenTouch and event.pressed:
-		tapped = true
-
-	if not tapped:
-		return
-
-	var world_pos: Vector2 = get_global_mouse_position()
-
-	if current_build_mode != BuildMode.NONE:
-		_try_place_building(world_pos)
-		return
-
-	var clicked_pawn: Node2D = _find_colonist_near(world_pos)
-	if clicked_pawn != null:
-		selected_colonist = clicked_pawn
-		status_label.text = "Вибрано: %s — тапніть по землі для руху" % clicked_pawn.name
-		return
-
-	if is_instance_valid(selected_colonist):
-		colonist_targets[selected_colonist] = world_pos
-		status_label.text = "%s прямує до точки..." % selected_colonist.name
-
-func _find_colonist_near(pos: Vector2) -> Node2D:
-	var best_pawn: Node2D = null
-	var best_dist: float = SELECT_RADIUS
-
-	var candidates: Array = get_tree().get_nodes_in_group("colonists")
-	if candidates.is_empty():
-		candidates = _collect_scene_pawns(get_tree().current_scene)
-
-	for item in candidates:
-		if item is Node2D and item != self:
-			var pawn_node: Node2D = item as Node2D
-			var d: float = pawn_node.global_position.distance_to(pos)
-			if d <= best_dist:
-				best_dist = d
-				best_pawn = pawn_node
-	return best_pawn
-
-func _collect_scene_pawns(root: Node) -> Array:
-	var result: Array = []
-	if root == null:
-		return result
-	for child in root.get_children():
-		if child is Node2D and (child.name in ["Олекса", "Соломія", "Богдан"] or child.has_node("Label")):
-			result.append(child)
-		result.append_array(_collect_scene_pawns(child))
-	return result
-
-func _try_place_building(world_pos: Vector2) -> void:
-	var cell: Vector2i = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
-	if placed_cells.has(cell):
-		status_label.text = "Ця клітинка вже зайнята"
-		return
-
-	var cost_wood: int = 0
-	var cost_steel: int = 0
-	var color: Color = Color.WHITE
-	var title: String = ""
-
-	match current_build_mode:
-		BuildMode.WALL:
-			cost_wood = 10
-			color = Color(0.55, 0.36, 0.20)
-			title = "Стіна"
-		BuildMode.BED:
-			cost_wood = 25
-			color = Color(0.25, 0.52, 0.85)
-			title = "Ліжко"
-		BuildMode.STORAGE:
-			cost_wood = 15
-			cost_steel = 10
-			color = Color(0.85, 0.72, 0.22)
-			title = "Склад"
-
-	if wood < cost_wood or steel < cost_steel:
-		status_label.text = "Не вистачає ресурсів (%d дер., %d сталі)" % [cost_wood, cost_steel]
-		return
-
-	wood -= cost_wood
-	steel -= cost_steel
-
-	var building: ColorRect = ColorRect.new()
-	building.size = Vector2(TILE_SIZE - 2.0, TILE_SIZE - 2.0)
-	building.position = Vector2(cell.x * TILE_SIZE + 1.0, cell.y * TILE_SIZE + 1.0)
-	building.color = color
-	building.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	get_tree().current_scene.add_child(building)
-
-	placed_cells[cell] = building
-	status_label.text = "Побудовано: %s (Дерево: %d | Сталь: %d)" % [title, wood, steel]
-
-func _create_selection_ring() -> void:
-	selection_ring = Line2D.new()
-	selection_ring.width = 2.5
-	selection_ring.default_color = Color(0.2, 1.0, 0.35)
-	selection_ring.closed = true
-	selection_ring.points = PackedVector2Array([
-		Vector2(-18, -22),
-		Vector2(18, -22),
-		Vector2(18, 22),
-		Vector2(-18, 22)
-	])
-	selection_ring.visible = false
-	selection_ring.z_index = 50
-	add_child(selection_ring)
-
-func _build_mobile_hud() -> void:
-	hud_layer = CanvasLayer.new()
-	hud_layer.layer = 10
-	hud_layer.visible = false
-	add_child(hud_layer)
-
-	var root_box: VBoxContainer = VBoxContainer.new()
-	root_box.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	root_box.offset_top = -126
-	root_box.offset_left = 12
-	root_box.offset_right = -12
-	root_box.offset_bottom = -10
-	root_box.add_theme_constant_override("separation", 6)
-	hud_layer.add_child(root_box)
-
-	status_label = Label.new()
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.text = "Тапніть по колоністу або виберіть будівлю знизу"
-	status_label.add_theme_font_size_override("font_size", 18)
-	root_box.add_child(status_label)
-
-	var panel: PanelContainer = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(0, 74)
-	root_box.add_child(panel)
-
-	var hbox: HBoxContainer = HBoxContainer.new()
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	hbox.add_theme_constant_override("separation", 10)
-	panel.add_child(hbox)
-
-	btn_wall = _make_hud_button("Стіна (10 дер.)", func(): _set_build_mode(BuildMode.WALL))
-	btn_bed = _make_hud_button("Ліжко (25 дер.)", func(): _set_build_mode(BuildMode.BED))
-	btn_storage = _make_hud_button("Склад (15д/10с)", func(): _set_build_mode(BuildMode.STORAGE))
-	btn_cancel = _make_hud_button("Скасувати", func(): _set_build_mode(BuildMode.NONE))
-
-	hbox.add_child(btn_wall)
-	hbox.add_child(btn_bed)
-	hbox.add_child(btn_storage)
-	hbox.add_child(btn_cancel)
-
-func _make_hud_button(caption: String, on_click: Callable) -> Button:
+func _make_button(caption: String, callback: Callable) -> Button:
 	var btn: Button = Button.new()
 	btn.text = caption
-	btn.custom_minimum_size = Vector2(155, 62)
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.add_theme_font_size_override("font_size", 17)
-	btn.pressed.connect(on_click)
+	btn.custom_minimum_size = Vector2(360, 64)
+	btn.add_theme_font_size_override("font_size", 22)
+	btn.pressed.connect(callback)
 	return btn
-
-func _set_build_mode(mode: BuildMode) -> void:
-	current_build_mode = mode
-	_refresh_buttons()
-	match mode:
-		BuildMode.NONE:
-			status_label.text = "Режим наказів: тапніть по колоністу"
-		BuildMode.WALL:
-			status_label.text = "Тапніть по клітинці, щоб поставити Стіну"
-		BuildMode.BED:
-			status_label.text = "Тапніть по клітинці, щоб поставити Ліжко"
-		BuildMode.STORAGE:
-			status_label.text = "Тапніть по клітинці, щоб поставити Склад"
-
-func _refresh_buttons() -> void:
-	btn_wall.disabled = (current_build_mode == BuildMode.WALL)
-	btn_bed.disabled = (current_build_mode == BuildMode.BED)
-	btn_storage.disabled = (current_build_mode == BuildMode.STORAGE)
-	btn_cancel.visible = (current_build_mode != BuildMode.NONE)
