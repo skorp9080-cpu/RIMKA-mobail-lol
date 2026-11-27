@@ -13,7 +13,7 @@ var colonists: Array = []
 var raiders: Array = []
 var wildlife: Array = []
 var nature_textures: Dictionary = {}
-var event_timer: float = 42.0
+var event_timer: float = 38.0
 
 const TRAITS_POOL: PackedStringArray = PackedStringArray(["Оптиміст", "Працьовитий", "Стрілець", "Нічна сова", "Песиміст"])
 const EXTRA_NAMES: PackedStringArray = PackedStringArray(["Тарас", "Дарина", "Мирослав", "Зоряна", "Іван", "Квітка"])
@@ -77,7 +77,7 @@ func _process(delta: float) -> void:
 
 		event_timer -= sim_delta
 		if event_timer <= 0.0:
-			event_timer = randf_range(50.0, 85.0)
+			event_timer = randf_range(45.0, 78.0)
 			_trigger_storyteller_event()
 
 		_process_wildlife(sim_delta)
@@ -88,40 +88,56 @@ func _process(delta: float) -> void:
 	_update_top_label()
 
 func _spawn_wildlife() -> void:
+	var saved_animals: Array = GameState.loaded_save_data.get("wildlife", []) if GameState.is_loading_save else []
+	if not saved_animals.is_empty():
+		for i: int in range(saved_animals.size()):
+			if saved_animals[i] is Dictionary:
+				var ad: Dictionary = saved_animals[i]
+				_create_animal_node(
+					str(ad.get("kind", "deer")),
+					Vector2(float(ad.get("x", 600.0)), float(ad.get("y", 600.0))),
+					bool(ad.get("tamed", false)),
+					i
+				)
+		return
+
 	var center: Vector2 = Vector2(float(GRID_W) * TILE_SIZE * 0.5, float(GRID_H) * TILE_SIZE * 0.5)
 	for i: int in range(8):
 		var kind: String = "boar" if (i % 2 == 0) else "deer"
-		var animal: Node2D = Node2D.new()
-		animal.name = "Animal_%s_%d" % [kind, i]
-		animal.add_to_group("wildlife")
 		var angle: float = randf() * TAU
 		var dist: float = randf_range(260.0, 760.0)
-		animal.position = center + Vector2(cos(angle), sin(angle)) * dist
-		animal.set_meta("kind", kind)
-		animal.set_meta("tamed", false)
-		animal.set_meta("hp", 75.0 if kind == "boar" else 55.0)
-		animal.set_meta("move_timer", randf_range(1.0, 3.5))
-		animal.set_meta("move_dir", Vector2.ZERO)
-		animal.z_index = 4
+		_create_animal_node(kind, center + Vector2(cos(angle), sin(angle)) * dist, false, i)
 
-		var spr: TextureRect = TextureRect.new()
-		spr.texture = nature_textures.get(kind) as Texture2D
-		spr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		spr.stretch_mode = TextureRect.STRETCH_SCALE
-		spr.size = Vector2(28, 28)
-		spr.position = Vector2(-14, -14)
-		spr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		animal.add_child(spr)
+func _create_animal_node(kind: String, pos: Vector2, tamed: bool, idx: int) -> void:
+	var animal: Node2D = Node2D.new()
+	animal.name = "Animal_%s_%d" % [kind, idx]
+	animal.add_to_group("wildlife")
+	animal.position = pos
+	animal.set_meta("kind", kind)
+	animal.set_meta("tamed", tamed)
+	animal.set_meta("hp", 75.0 if kind == "boar" else 55.0)
+	animal.set_meta("move_timer", randf_range(1.0, 3.5))
+	animal.set_meta("move_dir", Vector2.ZERO)
+	animal.z_index = 4
 
-		var lbl: Label = Label.new()
-		lbl.name = "AnimalLabel"
-		lbl.text = "Кабан" if kind == "boar" else "Олень"
-		lbl.position = Vector2(-24, -30)
-		lbl.add_theme_font_size_override("font_size", 11)
-		animal.add_child(lbl)
+	var spr: TextureRect = TextureRect.new()
+	spr.texture = nature_textures.get(kind) as Texture2D
+	spr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	spr.stretch_mode = TextureRect.STRETCH_SCALE
+	spr.size = Vector2(28, 28)
+	spr.position = Vector2(-14, -14)
+	spr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	animal.add_child(spr)
 
-		add_child(animal)
-		wildlife.append(animal)
+	var lbl: Label = Label.new()
+	lbl.name = "AnimalLabel"
+	lbl.text = ("[Ручний] " if tamed else "") + ("Кабан" if kind == "boar" else "Олень")
+	lbl.position = Vector2(-24, -30)
+	lbl.add_theme_font_size_override("font_size", 11)
+	animal.add_child(lbl)
+
+	add_child(animal)
+	wildlife.append(animal)
 
 func _process_wildlife(sim_delta: float) -> void:
 	for i: int in range(wildlife.size()):
@@ -206,7 +222,7 @@ func _update_top_label() -> void:
 
 func _trigger_storyteller_event() -> void:
 	var hud: Node = _get_hud()
-	var roll: int = randi() % 5
+	var roll: int = randi() % 7
 	match roll:
 		0:
 			var count: int = clampi(1 + GameState.current_day / 2, 1, 4)
@@ -234,6 +250,35 @@ func _trigger_storyteller_event() -> void:
 		4:
 			if hud != null and hud.has_method("enable_trader"):
 				hud.call("enable_trader")
+		5:
+			_trigger_meteor_impact(hud)
+		6:
+			_trigger_disease_outbreak(hud)
+
+func _trigger_meteor_impact(hud: Node) -> void:
+	var cx: int = randi_range(16, GRID_W - 16)
+	var cy: int = randi_range(12, GRID_H - 12)
+	var crater: ColorRect = ColorRect.new()
+	crater.size = Vector2(TILE_SIZE * 2.0, TILE_SIZE * 2.0)
+	crater.position = Vector2(float(cx - 1) * TILE_SIZE, float(cy - 1) * TILE_SIZE)
+	crater.color = Color(0.18, 0.16, 0.16, 0.88)
+	crater.z_index = 1
+	crater.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(crater)
+
+	if hud != null and hud.has_method("grant_meteor_loot"):
+		hud.call("grant_meteor_loot")
+	if hud != null and hud.has_method("notify_event"):
+		hud.call("notify_event", "Метеорит упав! У кратері знайдено сталь і компоненти")
+
+func _trigger_disease_outbreak(hud: Node) -> void:
+	for i: int in range(colonists.size()):
+		var p: Node2D = colonists[i] as Node2D
+		if p != null and is_instance_valid(p):
+			var hp: float = float(p.get_meta("hp", 100.0))
+			p.set_meta("hp", maxf(25.0, hp - 22.0))
+	if hud != null and hud.has_method("notify_event"):
+		hud.call("notify_event", "Спалах хвороби! Колоністи ослабли — потрібні медикаменти")
 
 func _spawn_raid(count: int) -> void:
 	var edge_x: float = 64.0 if (randi() % 2 == 0) else (float(GRID_W) * TILE_SIZE - 64.0)
@@ -496,59 +541,4 @@ func _build_top_bar() -> void:
 	top_status_lbl = Label.new()
 	top_status_lbl.text = " Д.1 08:00 | +18°C"
 	top_status_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top_status_lbl.add_theme_font_size_override("font_size", 13)
-	hbox.add_child(top_status_lbl)
-
-	var btn_zoom_out: Button = Button.new()
-	btn_zoom_out.text = "-"
-	btn_zoom_out.custom_minimum_size = Vector2(36, 38)
-	btn_zoom_out.pressed.connect(func(): _change_zoom(-0.2))
-	hbox.add_child(btn_zoom_out)
-
-	var btn_zoom_in: Button = Button.new()
-	btn_zoom_in.text = "+"
-	btn_zoom_in.custom_minimum_size = Vector2(36, 38)
-	btn_zoom_in.pressed.connect(func(): _change_zoom(0.2))
-	hbox.add_child(btn_zoom_in)
-
-	var speeds: Array = [
-		{"val": 0.0, "txt": "||"},
-		{"val": 1.0, "txt": "1x"},
-		{"val": 2.0, "txt": "2x"},
-		{"val": 3.0, "txt": "3x"}
-	]
-	for i: int in range(speeds.size()):
-		var sp: Dictionary = speeds[i]
-		var s_val: float = float(sp["val"])
-		var btn_s: Button = Button.new()
-		btn_s.text = str(sp["txt"])
-		btn_s.custom_minimum_size = Vector2(38, 38)
-		btn_s.pressed.connect(func(): _set_speed(s_val))
-		hbox.add_child(btn_s)
-		speed_buttons[s_val] = btn_s
-
-	_set_speed(1.0)
-
-	var btn_save: Button = Button.new()
-	btn_save.text = "Зберегти"
-	btn_save.custom_minimum_size = Vector2(88, 38)
-	btn_save.pressed.connect(func(): _save_current_colony(true))
-	hbox.add_child(btn_save)
-
-	var btn_menu: Button = Button.new()
-	btn_menu.text = "Меню"
-	btn_menu.custom_minimum_size = Vector2(72, 38)
-	btn_menu.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
-	hbox.add_child(btn_menu)
-
-func _change_zoom(delta_z: float) -> void:
-	if camera == null:
-		return
-	var next_z: float = clampf(camera.zoom.x + delta_z, 0.55, 2.2)
-	camera.zoom = Vector2(next_z, next_z)
-
-func _set_speed(val: float) -> void:
-	GameState.time_speed = val
-	for key in speed_buttons.keys():
-		var b: Button = speed_buttons[key] as Button
-		b.disabled = is_equal_
+	top_status_lbl
