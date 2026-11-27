@@ -11,6 +11,7 @@ var top_status_lbl: Label
 var speed_buttons: Dictionary = {}
 var colonists: Array = []
 var raiders: Array = []
+var wildlife: Array = []
 var nature_textures: Dictionary = {}
 var event_timer: float = 42.0
 
@@ -31,9 +32,14 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_day_night()
 	_generate_local_map()
+	_spawn_wildlife()
 	_spawn_initial_colonists()
 	_build_top_bar()
 	_ensure_mobile_hud()
+
+func focus_on_colonist(pawn: Node2D) -> void:
+	if camera != null and pawn != null and is_instance_valid(pawn):
+		camera.position = pawn.global_position
 
 func _ensure_mobile_hud() -> void:
 	var hud: Node = get_tree().root.get_node_or_null("MobileHUD")
@@ -74,11 +80,83 @@ func _process(delta: float) -> void:
 			event_timer = randf_range(50.0, 85.0)
 			_trigger_storyteller_event()
 
+		_process_wildlife(sim_delta)
 		_process_raiders(sim_delta)
 
 	_update_temperature()
 	_update_lighting()
 	_update_top_label()
+
+func _spawn_wildlife() -> void:
+	var center: Vector2 = Vector2(float(GRID_W) * TILE_SIZE * 0.5, float(GRID_H) * TILE_SIZE * 0.5)
+	for i: int in range(8):
+		var kind: String = "boar" if (i % 2 == 0) else "deer"
+		var animal: Node2D = Node2D.new()
+		animal.name = "Animal_%s_%d" % [kind, i]
+		animal.add_to_group("wildlife")
+		var angle: float = randf() * TAU
+		var dist: float = randf_range(260.0, 760.0)
+		animal.position = center + Vector2(cos(angle), sin(angle)) * dist
+		animal.set_meta("kind", kind)
+		animal.set_meta("tamed", false)
+		animal.set_meta("hp", 75.0 if kind == "boar" else 55.0)
+		animal.set_meta("move_timer", randf_range(1.0, 3.5))
+		animal.set_meta("move_dir", Vector2.ZERO)
+		animal.z_index = 4
+
+		var spr: TextureRect = TextureRect.new()
+		spr.texture = nature_textures.get(kind) as Texture2D
+		spr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		spr.stretch_mode = TextureRect.STRETCH_SCALE
+		spr.size = Vector2(28, 28)
+		spr.position = Vector2(-14, -14)
+		spr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		animal.add_child(spr)
+
+		var lbl: Label = Label.new()
+		lbl.name = "AnimalLabel"
+		lbl.text = "Кабан" if kind == "boar" else "Олень"
+		lbl.position = Vector2(-24, -30)
+		lbl.add_theme_font_size_override("font_size", 11)
+		animal.add_child(lbl)
+
+		add_child(animal)
+		wildlife.append(animal)
+
+func _process_wildlife(sim_delta: float) -> void:
+	for i: int in range(wildlife.size()):
+		var a: Node2D = wildlife[i] as Node2D
+		if a == null or not is_instance_valid(a):
+			continue
+		var tamed: bool = bool(a.get_meta("tamed", false))
+		var kind: String = str(a.get_meta("kind", "deer"))
+
+		if tamed:
+			var leader: Node2D = _find_nearest_colonist(a.global_position)
+			if leader != null and a.global_position.distance_to(leader.global_position) > 58.0:
+				a.global_position += (leader.global_position - a.global_position).normalized() * 95.0 * sim_delta
+		else:
+			var t_left: float = float(a.get_meta("move_timer", 1.5)) - sim_delta
+			var dir: Vector2 = a.get_meta("move_dir", Vector2.ZERO)
+			if t_left <= 0.0:
+				t_left = randf_range(2.0, 4.5)
+				if randf() < 0.65:
+					var ang: float = randf() * TAU
+					dir = Vector2(cos(ang), sin(ang))
+				else:
+					dir = Vector2.ZERO
+				a.set_meta("move_dir", dir)
+			a.set_meta("move_timer", t_left)
+			if dir != Vector2.ZERO:
+				var next_pos: Vector2 = a.global_position + dir * 32.0 * sim_delta
+				next_pos.x = clampf(next_pos.x, TILE_SIZE * 2.0, float(GRID_W - 2) * TILE_SIZE)
+				next_pos.y = clampf(next_pos.y, TILE_SIZE * 2.0, float(GRID_H - 2) * TILE_SIZE)
+				a.global_position = next_pos
+
+		var lbl: Label = a.get_node_or_null("AnimalLabel") as Label
+		if lbl != null:
+			var prefix: String = "[Ручний] " if tamed else ""
+			lbl.text = "%s%s" % [prefix, ("Кабан" if kind == "boar" else "Олень")]
 
 func _update_temperature() -> void:
 	var base_t: int = int(GameState.selected_tile.get("temp", 18))
@@ -145,6 +223,8 @@ func _trigger_storyteller_event() -> void:
 				_create_colonist_pawn(new_name, center + Vector2(randf_range(-180, 180), randf_range(-140, 140)), {})
 				if hud != null and hud.has_method("notify_event"):
 					hud.call("notify_event", "Подія: До колонії приєднався %s!" % new_name)
+				if hud != null and hud.has_method("rebuild_colonist_bar"):
+					hud.call("rebuild_colonist_bar")
 		3:
 			var events: PackedStringArray = PackedStringArray(["Теплова хвиля", "Похолодання", "Сонячний спалах", ""])
 			GameState.active_weather_event = events[randi() % events.size()]
@@ -471,76 +551,4 @@ func _set_speed(val: float) -> void:
 	GameState.time_speed = val
 	for key in speed_buttons.keys():
 		var b: Button = speed_buttons[key] as Button
-		b.disabled = is_equal_approx(float(key), val)
-
-func _save_current_colony(show_msg: bool) -> void:
-	var pawn_list: Array = []
-	for i: int in range(colonists.size()):
-		var p: Node2D = colonists[i] as Node2D
-		if p != null and is_instance_valid(p):
-			pawn_list.append({
-				"name": p.name,
-				"x": p.position.x,
-				"y": p.position.y,
-				"trait": str(p.get_meta("trait", "Оптиміст")),
-				"hp": float(p.get_meta("hp", 100.0)),
-				"mood": float(p.get_meta("mood", 85.0)),
-				"hunger": float(p.get_meta("hunger", 100.0)),
-				"energy": float(p.get_meta("energy", 100.0)),
-				"skill_work": int(p.get_meta("skill_work", 4)),
-				"skill_combat": int(p.get_meta("skill_combat", 3)),
-				"has_armor": bool(p.get_meta("has_armor", false)),
-				"has_rifle": bool(p.get_meta("has_rifle", false))
-			})
-	var ok: bool = GameState.save_game({"colonists": pawn_list})
-	if show_msg and top_status_lbl != null:
-		top_status_lbl.text = " Гру збережено!" if ok else " Помилка збереження"
-
-func _input(event: InputEvent) -> void:
-	if event is InputEventScreenDrag:
-		var spd: float = float(GameState.settings.get("camera_speed", 1.0))
-		camera.position -= event.relative * spd / camera.zoom.x
-
-func _fill_px(img: Image, x0: int, y0: int, w: int, h: int, col: Color) -> void:
-	var x_end: int = mini(TEX_SIZE, x0 + w)
-	var y_end: int = mini(TEX_SIZE, y0 + h)
-	var x_start: int = maxi(0, x0)
-	var y_start: int = maxi(0, y0)
-	for y: int in range(y_start, y_end):
-		for x: int in range(x_start, x_end):
-			img.set_pixel(x, y, col)
-
-func _fill_circle_px(img: Image, cx: int, cy: int, r: int, col: Color) -> void:
-	var r2: int = r * r
-	for y: int in range(maxi(0, cy - r), mini(TEX_SIZE, cy + r + 1)):
-		for x: int in range(maxi(0, cx - r), mini(TEX_SIZE, cx + r + 1)):
-			var dx: int = x - cx
-			var dy: int = y - cy
-			if dx * dx + dy * dy <= r2:
-				img.set_pixel(x, y, col)
-
-func _generate_nature_textures() -> void:
-	var t_img: Image = Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
-	t_img.fill(Color(0.0, 0.0, 0.0, 0.0))
-	_fill_circle_px(t_img, 66, 108, 26, Color(0.05, 0.12, 0.05, 0.45))
-	_fill_px(t_img, 54, 72, 20, 42, Color(0.38, 0.22, 0.10))
-	_fill_px(t_img, 58, 72, 8, 42, Color(0.50, 0.30, 0.14))
-	_fill_circle_px(t_img, 64, 52, 42, Color(0.08, 0.28, 0.10))
-	_fill_circle_px(t_img, 46, 56, 26, Color(0.11, 0.34, 0.13))
-	_fill_circle_px(t_img, 82, 56, 26, Color(0.07, 0.24, 0.09))
-	_fill_circle_px(t_img, 56, 38, 24, Color(0.18, 0.48, 0.18))
-	nature_textures["tree"] = ImageTexture.create_from_image(t_img)
-
-	var b_img: Image = Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
-	b_img.fill(Color(0.0, 0.0, 0.0, 0.0))
-	_fill_circle_px(b_img, 64, 74, 38, Color(0.10, 0.32, 0.12))
-	_fill_circle_px(b_img, 46, 78, 24, Color(0.14, 0.40, 0.16))
-	_fill_circle_px(b_img, 82, 78, 24, Color(0.12, 0.36, 0.14))
-	_fill_circle_px(b_img, 64, 62, 26, Color(0.18, 0.48, 0.20))
-	var berry_coords: Array = [
-		Vector2i(46, 66), Vector2i(52, 72), Vector2i(76, 62),
-		Vector2i(82, 70), Vector2i(62, 82), Vector2i(68, 88),
-		Vector2i(58, 54), Vector2i(74, 82)
-	]
-	for i: int in range(berry_coords.size()):
-		var pt: Vector2i = berry_coords[i
+		b.disabled = is_equal_
