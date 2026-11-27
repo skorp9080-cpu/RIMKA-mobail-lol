@@ -12,7 +12,6 @@ var placed_cells: Dictionary = {}
 var placed_floors: Dictionary = {}
 var item_textures: Dictionary = {}
 
-# Черга наказів: масив словників { "type": String, "cell": Vector2i, "world_pos": Vector2, "target_node": Node, "marker": Control, "worker": Node2D, "progress": float }
 var work_orders: Array = []
 
 var wood: int = 200
@@ -93,24 +92,21 @@ func _physics_process(delta: float) -> void:
 			work_orders.clear()
 		return
 
-	# 1. Рух за прямими ручними наказами
-	for pawn in colonist_targets.keys():
-		if not is_instance_valid(pawn):
-			colonist_targets.erase(pawn)
+	for pawn_key in colonist_targets.keys():
+		var pawn_node: Node2D = pawn_key as Node2D
+		if pawn_node == null or not is_instance_valid(pawn_node):
+			colonist_targets.erase(pawn_key)
 			continue
-		var pawn_node: Node2D = pawn as Node2D
-		var target: Vector2 = colonist_targets[pawn]
+		var target: Vector2 = colonist_targets[pawn_key]
 		var to_target: Vector2 = target - pawn_node.global_position
 		if to_target.length() <= 4.0:
 			pawn_node.global_position = target
-			colonist_targets.erase(pawn)
+			colonist_targets.erase(pawn_key)
 		else:
 			pawn_node.global_position += to_target.normalized() * 115.0 * delta
 
-	# 2. Автоматичне виконання черги наказів колоністами
 	_process_work_orders(delta)
 
-	# 3. Оновлення рамки виділення
 	if is_instance_valid(selected_colonist):
 		selection_ring.visible = true
 		selection_ring.global_position = selected_colonist.global_position
@@ -125,34 +121,36 @@ func _process_work_orders(delta: float) -> void:
 	var all_pawns: Array = _get_all_colonists()
 	var busy_pawns: Array = []
 
-	for order in work_orders:
+	for i in range(work_orders.size()):
+		var order: Dictionary = work_orders[i]
 		var w: Variant = order.get("worker", null)
 		if w != null and is_instance_valid(w) and not colonist_targets.has(w):
 			busy_pawns.append(w)
 		else:
 			order["worker"] = null
 
-	# Призначаємо вільних колоністів на найближчі вільні накази
-	for order in work_orders:
+	for i in range(work_orders.size()):
+		var order: Dictionary = work_orders[i]
 		if order.get("worker", null) != null:
 			continue
 		var target_pos: Vector2 = order["world_pos"]
 		var best_pawn: Node2D = null
 		var best_dist: float = 999999.0
 		for p in all_pawns:
-			if p is Node2D and not busy_pawns.has(p) and not colonist_targets.has(p):
-				var d: float = (p as Node2D).global_position.distance_to(target_pos)
+			var p_node: Node2D = p as Node2D
+			if p_node != null and not busy_pawns.has(p_node) and not colonist_targets.has(p_node):
+				var d: float = p_node.global_position.distance_to(target_pos)
 				if d < best_dist:
 					best_dist = d
-					best_pawn = p as Node2D
+					best_pawn = p_node
 		if best_pawn != null:
 			order["worker"] = best_pawn
 			busy_pawns.append(best_pawn)
 
-	# Рухаємо призначених колоністів і рахуємо прогрес роботи
 	var completed: Array = []
-	for order in work_orders:
-		var worker: Node2D = order.get("worker", null)
+	for i in range(work_orders.size()):
+		var order: Dictionary = work_orders[i]
+		var worker: Node2D = order.get("worker", null) as Node2D
 		if worker == null or not is_instance_valid(worker):
 			continue
 		var target_pos: Vector2 = order["world_pos"]
@@ -160,48 +158,51 @@ func _process_work_orders(delta: float) -> void:
 		if diff.length() > WORK_DISTANCE:
 			worker.global_position += diff.normalized() * 105.0 * delta
 		else:
-			var speed: float = 0.55 if str(order["type"]) == "order_chop" else (0.38 if str(order["type"]) == "order_mine" else 0.70)
-			order["progress"] = float(order.get("progress", 0.0)) + delta * speed
-			if float(order["progress"]) >= 1.0:
+			var o_type: String = str(order["type"])
+			var speed: float = 0.55 if o_type == "order_chop" else (0.38 if o_type == "order_mine" else 0.70)
+			var prog: float = float(order.get("progress", 0.0)) + delta * speed
+			order["progress"] = prog
+			if prog >= 1.0:
 				completed.append(order)
 
-	for done_order in completed:
+	for i in range(completed.size()):
+		var done_order: Dictionary = completed[i]
 		_finish_work_order(done_order)
 		work_orders.erase(done_order)
 
 func _finish_work_order(order: Dictionary) -> void:
 	var order_type: String = str(order["type"])
 	var cell: Vector2i = order["cell"]
-	var marker: Variant = order.get("marker", null)
+	var marker: Node = order.get("marker", null) as Node
 	if marker != null and is_instance_valid(marker):
-		(marker as Node).queue_free()
+		marker.queue_free()
 
-	var target_node: Variant = order.get("target_node", null)
+	var target_node: Node = order.get("target_node", null) as Node
 
 	match order_type:
 		"order_chop":
 			if target_node != null and is_instance_valid(target_node):
-				(target_node as Node).queue_free()
+				target_node.queue_free()
 			wood += 25
 			status_label.text = "Дерево зрубано (+25 дер.) | Дер: %d, Сталь: %d, Кам: %d" % [wood, steel, stone]
 		"order_mine":
 			if target_node != null and is_instance_valid(target_node):
-				(target_node as Node).queue_free()
-			var ridge: Variant = order.get("extra_node", null)
+				target_node.queue_free()
+			var ridge: Node = order.get("extra_node", null) as Node
 			if ridge != null and is_instance_valid(ridge):
-				(ridge as Node).queue_free()
+				ridge.queue_free()
 			stone += 20
 			steel += 15
 			status_label.text = "Скелю видобуто (+20 кам., +15 сталі) | Дер: %d, Сталь: %d, Кам: %d" % [wood, steel, stone]
 		"order_deconstruct":
 			if placed_cells.has(cell):
-				var b_node: Node = placed_cells[cell]
+				var b_node: Node = placed_cells[cell] as Node
 				var b_id: String = str(b_node.get_meta("build_id", ""))
 				_refund_resources(b_id)
 				b_node.queue_free()
 				placed_cells.erase(cell)
 			elif placed_floors.has(cell):
-				var f_node: Node = placed_floors[cell]
+				var f_node: Node = placed_floors[cell] as Node
 				var f_id: String = str(f_node.get_meta("build_id", ""))
 				_refund_resources(f_id)
 				f_node.queue_free()
@@ -250,9 +251,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _try_assign_order(world_pos: Vector2) -> void:
 	var cell: Vector2i = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
-	var cell_center: Vector2 = Vector2((cell.x + 0.5) * TILE_SIZE, (cell.y + 0.5) * TILE_SIZE)
+	var cell_center: Vector2 = Vector2((float(cell.x) + 0.5) * TILE_SIZE, (float(cell.y) + 0.5) * TILE_SIZE)
 
-	for existing in work_orders:
+	for i in range(work_orders.size()):
+		var existing: Dictionary = work_orders[i]
 		if existing["cell"] == cell:
 			status_label.text = "На цю клітинку вже призначено наказ"
 			return
@@ -314,7 +316,7 @@ func _try_assign_order(world_pos: Vector2) -> void:
 		status_label.text = "Наказ: розібрати будівлю (у черзі: %d)" % work_orders.size()
 
 func _find_map_object_at_cell(root: Node, cell: Vector2i, kind: String) -> Control:
-	var cell_rect: Rect2 = Rect2(cell.x * TILE_SIZE, cell.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+	var cell_rect: Rect2 = Rect2(float(cell.x) * TILE_SIZE, float(cell.y) * TILE_SIZE, TILE_SIZE, TILE_SIZE)
 	for child in root.get_children():
 		if child is ColorRect:
 			var cr: ColorRect = child as ColorRect
@@ -334,7 +336,7 @@ func _create_order_marker(cell: Vector2i, tex_id: String) -> TextureRect:
 	marker.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	marker.stretch_mode = TextureRect.STRETCH_SCALE
 	marker.size = Vector2(TILE_SIZE, TILE_SIZE)
-	marker.position = Vector2(cell.x * TILE_SIZE, cell.y * TILE_SIZE)
+	marker.position = Vector2(float(cell.x) * TILE_SIZE, float(cell.y) * TILE_SIZE)
 	marker.modulate = Color(1.0, 1.0, 1.0, 0.85)
 	marker.z_index = 20
 	marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -352,8 +354,8 @@ func _find_colonist_near(pos: Vector2) -> Node2D:
 	var best_dist: float = SELECT_RADIUS
 
 	for item in _get_all_colonists():
-		if item is Node2D and item != self:
-			var pawn_node: Node2D = item as Node2D
+		var pawn_node: Node2D = item as Node2D
+		if pawn_node != null and pawn_node != self:
 			var d: float = pawn_node.global_position.distance_to(pos)
 			if d <= best_dist:
 				best_dist = d
@@ -373,7 +375,8 @@ func _collect_scene_pawns(root: Node) -> Array:
 func _find_item_def(item_id: String) -> Dictionary:
 	for cat in build_catalog.keys():
 		var list: Array = build_catalog[cat]
-		for entry in list:
+		for i in range(list.size()):
+			var entry: Dictionary = list[i]
 			if str(entry["id"]) == item_id:
 				return entry
 	return {}
@@ -410,7 +413,7 @@ func _try_place_building(world_pos: Vector2) -> void:
 	block.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	block.stretch_mode = TextureRect.STRETCH_SCALE
 	block.size = Vector2(TILE_SIZE, TILE_SIZE)
-	block.position = Vector2(cell.x * TILE_SIZE, cell.y * TILE_SIZE)
+	block.position = Vector2(float(cell.x) * TILE_SIZE, float(cell.y) * TILE_SIZE)
 	block.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	block.set_meta("build_id", selected_build_id)
 	if is_floor:
@@ -466,8 +469,8 @@ func _build_mobile_hud() -> void:
 	tabs_hbox.add_theme_constant_override("separation", 5)
 	root_box.add_child(tabs_hbox)
 
-	for cat_id in categories_order:
-		var cid: String = str(cat_id)
+	for i in range(categories_order.size()):
+		var cid: String = str(categories_order[i])
 		var tab_btn: Button = Button.new()
 		tab_btn.text = str(category_titles[cid])
 		tab_btn.custom_minimum_size = Vector2(95, 42)
@@ -496,7 +499,7 @@ func _build_mobile_hud() -> void:
 func _select_category(cat_id: String) -> void:
 	current_category = cat_id
 	for key in category_buttons.keys():
-		var b: Button = category_buttons[key]
+		var b: Button = category_buttons[key] as Button
 		b.disabled = (str(key) == cat_id)
 	_rebuild_item_buttons()
 
@@ -505,7 +508,8 @@ func _rebuild_item_buttons() -> void:
 		child.queue_free()
 
 	var list: Array = build_catalog.get(current_category, [])
-	for entry in list:
+	for i in range(list.size()):
+		var entry: Dictionary = list[i]
 		var item_id: String = str(entry["id"])
 		var btn: Button = Button.new()
 
@@ -560,6 +564,4 @@ func _generate_all_textures() -> void:
 	item_textures["floor_stone"] = _make_tex(Color(0.68, 0.68, 0.70), "tiles")
 	item_textures["floor_steel"] = _make_tex(Color(0.60, 0.66, 0.72), "tiles")
 
-	item_textures["bed"] = _make_tex(Color(0.24, 0.50, 0.86), "bed")
-	item_textures["table"] = _make_tex(Color(0.66, 0.44, 0.22), "table")
-	item_t
+	item_text
