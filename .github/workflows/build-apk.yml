@@ -43,10 +43,44 @@ jobs:
           JAVA_BIN="$(readlink -f "$(which java)")"
           JAVA_DIR="$(dirname "$(dirname "$JAVA_BIN")")"
 
-          printf '[gd_editor_settings]\n\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/debug_keystore = "%s"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$SDK_DIR" "$JAVA_DIR" "$KEYSTORE_PATH" > /root/.config/godot/editor_settings-4.tres
-          cp /root/.config/godot/editor_settings-4.tres /root/.config/godot/editor_settings-4.editor_settings
-          cp /root/.config/godot/editor_settings-4.tres /github/home/.config/godot/editor_settings-4.tres
-          cp /root/.config/godot/editor_settings-4.tres /github/home/.config/godot/editor_settings-4.editor_settings
+          HOME=/root godot --headless --quit || true
+          HOME=/github/home godot --headless --quit || true
+
+          python3 - "$SDK_DIR" "$JAVA_DIR" "$KEYSTORE_PATH" << 'PY'
+          import sys, glob
+
+          sdk, java_dir, ks = sys.argv[1:4]
+          paths = glob.glob("/root/.config/godot/editor_settings-4*") + glob.glob("/github/home/.config/godot/editor_settings-4*")
+          lines_to_set = {
+              "export/android/android_sdk_path": f'"{sdk}"',
+              "export/android/java_sdk_path": f'"{java_dir}"',
+              "export/android/debug_keystore": f'"{ks}"',
+              "export/android/debug_keystore_user": '"androiddebugkey"',
+              "export/android/debug_keystore_pass": '"android"',
+          }
+
+          for p in set(paths):
+              try:
+                  with open(p, "r", encoding="utf-8") as f:
+                      text = f.read()
+              except Exception:
+                  continue
+              for k, v in lines_to_set.items():
+                  prefix = k + " ="
+                  new_line = f"{prefix} {v}"
+                  if prefix in text:
+                      out = []
+                      for line in text.splitlines():
+                          if line.startswith(prefix):
+                              out.append(new_line)
+                          else:
+                              out.append(line)
+                      text = "\n".join(out) + "\n"
+                  else:
+                      text = text.rstrip() + "\n" + new_line + "\n"
+              with open(p, "w", encoding="utf-8") as f:
+                  f.write(text)
+          PY
 
       - name: Export Debug APK
         run: |
