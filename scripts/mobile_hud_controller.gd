@@ -101,6 +101,10 @@ var build_catalog: Dictionary = {
 		{"id": "heater", "name": "Обігрівач", "wood": 0, "steel": 20, "stone": 0, "is_floor": false, "req_tech": "electricity"},
 		{"id": "cooler", "name": "Кондиціонер", "wood": 0, "steel": 30, "stone": 0, "is_floor": false, "req_tech": "electricity"},
 		{"id": "turret", "name": "Авто-турель", "wood": 0, "steel": 45, "stone": 0, "is_floor": false, "req_tech": "turrets"}
+	],
+	"gear": [
+		{"id": "craft_rifle", "name": "Гвинтівка (30 ст.)", "wood": 0, "steel": 30, "stone": 0, "is_craft": true, "req_tech": "armory"},
+		{"id": "craft_armor", "name": "Броня (40 ст.)", "wood": 0, "steel": 40, "stone": 0, "is_craft": true, "req_tech": "armory"}
 	]
 }
 
@@ -110,6 +114,64 @@ func _ready() -> void:
 	_build_mobile_hud()
 	rebuild_colonist_bar()
 	_select_category("orders")
+	_refresh_resource_bar()
+
+func export_save_state() -> Dictionary:
+	var buildings: Array = []
+	for k in placed_cells.keys():
+		var node: Control = placed_cells[k] as Control
+		if node != null and is_instance_valid(node):
+			var c: Vector2i = k as Vector2i
+			buildings.append({
+				"x": c.x,
+				"y": c.y,
+				"build_id": str(node.get_meta("build_id", "")),
+				"is_floor": false
+			})
+	for k in placed_floors.keys():
+		var fnode: Control = placed_floors[k] as Control
+		if fnode != null and is_instance_valid(fnode):
+			var fc: Vector2i = k as Vector2i
+			buildings.append({
+				"x": fc.x,
+				"y": fc.y,
+				"build_id": str(fnode.get_meta("build_id", "")),
+				"is_floor": true
+			})
+	return {
+		"wood": wood,
+		"steel": steel,
+		"stone": stone,
+		"food": food,
+		"meds": meds,
+		"components": components,
+		"stored_power_wh": stored_power_wh,
+		"trader_available": trader_available,
+		"buildings": buildings
+	}
+
+func import_save_state(hud_state: Dictionary) -> void:
+	if hud_state.is_empty():
+		return
+	wood = int(hud_state.get("wood", wood))
+	steel = int(hud_state.get("steel", steel))
+	stone = int(hud_state.get("stone", stone))
+	food = int(hud_state.get("food", food))
+	meds = int(hud_state.get("meds", meds))
+	components = int(hud_state.get("components", components))
+	stored_power_wh = float(hud_state.get("stored_power_wh", stored_power_wh))
+	trader_available = bool(hud_state.get("trader_available", trader_available))
+
+	var b_list: Array = hud_state.get("buildings", [])
+	for i: int in range(b_list.size()):
+		if b_list[i] is Dictionary:
+			var bd: Dictionary = b_list[i]
+			var cell: Vector2i = Vector2i(int(bd.get("x", 0)), int(bd.get("y", 0)))
+			var bid: String = str(bd.get("build_id", ""))
+			var is_fl: bool = bool(bd.get("is_floor", false))
+			if bid != "":
+				_spawn_placed_node(cell, bid, is_fl)
+
 	_refresh_resource_bar()
 
 func _is_colony_scene() -> bool:
@@ -472,56 +534,4 @@ func _process_work_orders(sim_delta: float) -> void:
 		var worker: Node2D = order.get("worker", null) as Node2D
 		if worker == null or not is_instance_valid(worker):
 			continue
-		var target_pos: Vector2 = order["world_pos"]
-		var diff: Vector2 = target_pos - worker.global_position
-		if diff.length() > WORK_DISTANCE:
-			worker.global_position += diff.normalized() * 105.0 * sim_delta
-		else:
-			var o_type: String = str(order["type"])
-			var w_skill: float = float(worker.get_meta("skill_work", 4))
-			var trait_mult: float = 1.25 if str(worker.get_meta("trait", "")) == "Працьовитий" else 1.0
-			var base_spd: float = 0.50 if o_type == "order_chop" else (0.35 if o_type == "order_mine" else 0.68)
-			var speed: float = base_spd * (1.0 + w_skill * 0.06) * trait_mult
-			var prog: float = float(order.get("progress", 0.0)) + sim_delta * speed
-			order["progress"] = prog
-			var bar_fill: ColorRect = order.get("bar_fill", null) as ColorRect
-			if bar_fill != null and is_instance_valid(bar_fill):
-				bar_fill.size.x = clampf(prog, 0.0, 1.0) * (TILE_SIZE - 4.0)
-			if prog >= 1.0:
-				worker.set_meta("skill_work", mini(20, int(w_skill) + 1))
-				completed.append(order)
-
-	for i: int in range(completed.size()):
-		var done_order: Dictionary = completed[i]
-		_finish_work_order(done_order)
-		work_orders.erase(done_order)
-
-func _finish_work_order(order: Dictionary) -> void:
-	var order_type: String = str(order["type"])
-	var cell: Vector2i = order["cell"]
-	var marker: Node = order.get("marker", null) as Node
-	if marker != null and is_instance_valid(marker):
-		marker.queue_free()
-
-	var target_node: Node = order.get("target_node", null) as Node
-
-	match order_type:
-		"order_chop":
-			if target_node != null and is_instance_valid(target_node):
-				target_node.queue_free()
-			wood += 25
-			notify_event("Дерево зрубано (+25 дер.)")
-		"order_mine":
-			if target_node != null and is_instance_valid(target_node):
-				target_node.queue_free()
-			var ridge: Node = order.get("extra_node", null) as Node
-			if ridge != null and is_instance_valid(ridge):
-				ridge.queue_free()
-			stone += 20
-			steel += 15
-			if randf() < 0.25:
-				components += 1
-			notify_event("Скелю видобуто (+20 кам., +15 сталі)")
-		"order_harvest":
-			var gain: int = 12
-			if target_node != null and is_instance_valid
+		var target_pos: Ve
