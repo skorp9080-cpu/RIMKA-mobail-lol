@@ -34,7 +34,7 @@ var category_buttons: Dictionary = {}
 var items_hbox: HBoxContainer
 var btn_cancel: Button
 
-var categories_order: PackedStringArray = PackedStringArray(["orders", "farm", "walls", "floors", "furniture", "workbenches", "power", "research", "trade"])
+var categories_order: PackedStringArray = PackedStringArray(["orders", "farm", "walls", "floors", "furniture", "workbenches", "power", "gear", "research", "trade"])
 var category_titles: Dictionary = {
 	"orders": "Накази",
 	"farm": "Ферма",
@@ -43,6 +43,7 @@ var category_titles: Dictionary = {
 	"furniture": "Меблі",
 	"workbenches": "Верстаки",
 	"power": "Енергія",
+	"gear": "Зброя",
 	"research": "Наука",
 	"trade": "Торгівля"
 }
@@ -50,7 +51,8 @@ var category_titles: Dictionary = {
 var tech_catalog: Array = [
 	{"id": "electricity", "name": "Електрика", "cost": 100.0},
 	{"id": "turrets", "name": "Авто-турелі", "cost": 160.0},
-	{"id": "hydroponics", "name": "Гідропоніка", "cost": 220.0}
+	{"id": "hydroponics", "name": "Гідропоніка", "cost": 220.0},
+	{"id": "armory", "name": "Зброярня", "cost": 180.0}
 ]
 
 var build_catalog: Dictionary = {
@@ -66,6 +68,8 @@ var build_catalog: Dictionary = {
 		{"id": "campfire", "name": "Багаття", "wood": 20, "steel": 0, "stone": 5, "is_floor": false}
 	],
 	"walls": [
+		{"id": "door_wood", "name": "Дер. двері", "wood": 12, "steel": 0, "stone": 0, "is_floor": false},
+		{"id": "door_steel", "name": "Стал. двері", "wood": 0, "steel": 20, "stone": 0, "is_floor": false},
 		{"id": "wall_wood", "name": "Дер. стіна", "wood": 10, "steel": 0, "stone": 0, "is_floor": false},
 		{"id": "wall_stone", "name": "Кам. стіна", "wood": 0, "steel": 0, "stone": 15, "is_floor": false},
 		{"id": "wall_steel", "name": "Стал. стіна", "wood": 0, "steel": 15, "stone": 0, "is_floor": false}
@@ -91,6 +95,8 @@ var build_catalog: Dictionary = {
 		{"id": "solar", "name": "Сон. панель", "wood": 0, "steel": 25, "stone": 0, "is_floor": false, "req_tech": "electricity"},
 		{"id": "wind", "name": "Вітряк", "wood": 15, "steel": 30, "stone": 0, "is_floor": false, "req_tech": "electricity"},
 		{"id": "battery", "name": "Акумулятор", "wood": 0, "steel": 20, "stone": 0, "is_floor": false, "req_tech": "electricity"},
+		{"id": "heater", "name": "Обігрівач", "wood": 0, "steel": 20, "stone": 0, "is_floor": false, "req_tech": "electricity"},
+		{"id": "cooler", "name": "Кондиціонер", "wood": 0, "steel": 30, "stone": 0, "is_floor": false, "req_tech": "electricity"},
 		{"id": "turret", "name": "Авто-турель", "wood": 0, "steel": 45, "stone": 0, "is_floor": false, "req_tech": "turrets"}
 	]
 }
@@ -107,6 +113,26 @@ func _is_colony_scene() -> bool:
 	if scene == null:
 		return false
 	return scene.name != "MainMenu" and not scene.scene_file_path.ends_with("MainMenu.tscn")
+
+func get_climate_offset() -> int:
+	if GameState.active_weather_event == "Сонячний спалах" or stored_power_wh <= 5.0:
+		return 0
+	var offset: int = 0
+	for cell_key in placed_cells.keys():
+		var node: Control = placed_cells[cell_key] as Control
+		if node == null or not is_instance_valid(node):
+			continue
+		var bid: String = str(node.get_meta("build_id", ""))
+		if bid == "heater":
+			offset += 5
+		elif bid == "cooler":
+			offset -= 5
+	return clampi(offset, -15, 15)
+
+func get_power_summary() -> String:
+	if GameState.active_weather_event == "Сонячний спалах":
+		return "0Wh (Спалах)"
+	return "%dWh" % int(stored_power_wh)
 
 func notify_event(text_msg: String) -> void:
 	if status_label != null:
@@ -196,8 +222,8 @@ func _update_power_and_turrets(sim_delta: float) -> void:
 		elif b_id == "turret":
 			net_gen -= 15.0
 			turret_nodes.append(node)
-		elif b_id == "hydro_basin":
-			net_gen -= 12.0
+		elif b_id == "hydro_basin" or b_id == "heater" or b_id == "cooler":
+			net_gen -= 10.0
 
 	stored_power_wh = clampf(stored_power_wh + net_gen * sim_delta, 0.0, 2000.0)
 
@@ -238,7 +264,7 @@ func _update_research(sim_delta: float) -> void:
 					GameState.unlocked_techs.append(GameState.active_research_id)
 				notify_event("Дослідження завершено: %s!" % str(tech["name"]))
 				GameState.active_research_id = ""
-				if current_category == "research":
+				if current_category == "research" or current_category == "gear" or current_category == "power" or current_category == "farm":
 					_rebuild_item_buttons()
 			break
 
@@ -255,14 +281,12 @@ func _update_colonist_simulation(sim_delta: float) -> void:
 		var energy: float = float(pawn.get_meta("energy", 100.0))
 		var mood: float = float(pawn.get_meta("mood", 85.0))
 
-		# Лікування медикаментами при пораненні
 		if hp < 75.0 and meds > 0:
 			meds -= 1
 			hp = minf(100.0, hp + 40.0)
 			_refresh_resource_bar()
 			notify_event("%s перев'язав рани (-1 медикамент)" % pawn.name)
 
-		# Авто-сон на ліжках
 		var bed_pos: Vector2 = _find_nearest_bed(pawn.global_position)
 		var is_night: bool = GameState.game_time_hours >= 22.0 or GameState.game_time_hours < 6.0
 		if trait_name == "Нічна сова":
@@ -277,13 +301,11 @@ func _update_colonist_simulation(sim_delta: float) -> void:
 		else:
 			energy = maxf(0.0, energy - sim_delta * 0.48)
 
-		# Харчування
 		if hunger < 25.0 and food >= 10:
 			food -= 10
 			hunger = minf(100.0, hunger + 65.0)
 			_refresh_resource_bar()
 
-		# Розрахунок настрою (Mood)
 		var target_mood: float = 75.0
 		if trait_name == "Оптиміст":
 			target_mood += 12.0
@@ -297,7 +319,6 @@ func _update_colonist_simulation(sim_delta: float) -> void:
 			target_mood -= 12.0
 		mood = move_toward(mood, clampf(target_mood, 5.0, 100.0), sim_delta * 2.5)
 
-		# Психічний зрив при низькому настрої
 		if mood < 18.0 and randf() < sim_delta * 0.08:
 			colonist_targets[pawn] = pawn.global_position + Vector2(randf_range(-160, 160), randf_range(-160, 160))
 			mood = 45.0
@@ -308,9 +329,15 @@ func _update_colonist_simulation(sim_delta: float) -> void:
 		pawn.set_meta("energy", energy)
 		pawn.set_meta("mood", mood)
 
+		var gear_marks: String = ""
+		if bool(pawn.get_meta("has_armor", false)):
+			gear_marks += "[Бр]"
+		if bool(pawn.get_meta("has_rifle", false)):
+			gear_marks += "[Гв]"
+
 		var lbl: Label = pawn.get_node_or_null("NameLabel") as Label
 		if lbl != null:
-			lbl.text = "%s (%s)\nХП:%d%% Настрій:%d%%\nЇжа:%d%% Сон:%d%%" % [pawn.name, trait_name, int(hp), int(mood), int(hunger), int(energy)]
+			lbl.text = "%s %s\nХП:%d%% Настрій:%d%%\nЇжа:%d%% Сон:%d%%" % [pawn.name, gear_marks, int(hp), int(mood), int(hunger), int(energy)]
 
 func _find_nearest_bed(from_pos: Vector2) -> Vector2:
 	var best_pos: Vector2 = Vector2.ZERO
@@ -503,41 +530,4 @@ func _unhandled_input(event: InputEvent) -> void:
 		colonist_targets[selected_colonist] = world_pos
 		notify_event("%s прямує до точки..." % selected_colonist.name)
 
-func _try_assign_order(world_pos: Vector2) -> void:
-	var cell: Vector2i = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
-	var cell_center: Vector2 = Vector2((float(cell.x) + 0.5) * TILE_SIZE, (float(cell.y) + 0.5) * TILE_SIZE)
-
-	for i: int in range(work_orders.size()):
-		var existing: Dictionary = work_orders[i]
-		if existing["cell"] == cell:
-			notify_event("На цю клітинку вже призначено наказ")
-			return
-
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return
-
-	if selected_build_id == "order_chop":
-		var tree_node: Control = _find_map_object_at_cell(scene, cell, "tree")
-		if tree_node == null:
-			notify_event("Тут немає дерева! Тапніть по дереву")
-			return
-		var marker_data: Dictionary = _create_order_marker(cell, "order_chop")
-		work_orders.append({
-			"type": "order_chop",
-			"cell": cell,
-			"world_pos": cell_center,
-			"target_node": tree_node,
-			"marker": marker_data["root"],
-			"bar_fill": marker_data["fill"],
-			"worker": null,
-			"progress": 0.0
-		})
-		notify_event("Наказ: зрубати дерево (у черзі: %d)" % work_orders.size())
-
-	elif selected_build_id == "order_mine":
-		var rock_node: Control = _find_map_object_at_cell(scene, cell, "rock")
-		if rock_node == null:
-			notify_event("Тут немає скелі! Тапніть по сірій скелі")
-			return
-		var ridge_node: Control = _find_map_object_at_c
+func _try_assign_order(world_pos: Vector2) -> voi
