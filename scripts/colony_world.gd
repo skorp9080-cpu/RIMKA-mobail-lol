@@ -71,7 +71,7 @@ func _process(delta: float) -> void:
 
 		event_timer -= sim_delta
 		if event_timer <= 0.0:
-			event_timer = randf_range(55.0, 95.0)
+			event_timer = randf_range(50.0, 85.0)
 			_trigger_storyteller_event()
 
 		_process_raiders(sim_delta)
@@ -88,7 +88,13 @@ func _update_temperature() -> void:
 		weather_offset = 16
 	elif GameState.active_weather_event == "Похолодання":
 		weather_offset = -18
-	GameState.ambient_temp = base_t + day_offset + weather_offset
+
+	var climate_delta: int = 0
+	var hud: Node = _get_hud()
+	if hud != null and hud.has_method("get_climate_offset"):
+		climate_delta = int(hud.call("get_climate_offset"))
+
+	GameState.ambient_temp = base_t + day_offset + weather_offset + climate_delta
 
 func _update_lighting() -> void:
 	if day_night_modulate == null:
@@ -114,24 +120,25 @@ func _update_top_label() -> void:
 	var h_int: int = int(floor(GameState.game_time_hours))
 	var m_int: int = int(floor((GameState.game_time_hours - float(h_int)) * 60.0))
 	var ev_txt: String = " | %s" % GameState.active_weather_event if GameState.active_weather_event != "" else ""
-	top_status_lbl.text = " Д.%d %02d:%02d | %+d°C%s" % [GameState.current_day, h_int, m_int, GameState.ambient_temp, ev_txt]
+	var pwr_txt: String = ""
+	var hud: Node = _get_hud()
+	if hud != null and hud.has_method("get_power_summary"):
+		pwr_txt = " | %s" % str(hud.call("get_power_summary"))
+	top_status_lbl.text = " Д.%d %02d:%02d | %+d°C%s%s" % [GameState.current_day, h_int, m_int, GameState.ambient_temp, pwr_txt, ev_txt]
 
 func _trigger_storyteller_event() -> void:
 	var hud: Node = _get_hud()
 	var roll: int = randi() % 5
 	match roll:
 		0:
-			# Набіг рейдерів
 			var count: int = clampi(1 + GameState.current_day / 2, 1, 4)
 			_spawn_raid(count)
 			if hud != null and hud.has_method("notify_event"):
 				hud.call("notify_event", "УВАГА: Набіг рейдерів (%d ворогів)!" % count)
 		1:
-			# Скидання вантажних капсул
 			if hud != null and hud.has_method("grant_drop_pod"):
 				hud.call("grant_drop_pod")
 		2:
-			# Новий колоніст просить притулку
 			if colonists.size() < 8:
 				var new_name: String = EXTRA_NAMES[randi() % EXTRA_NAMES.size()]
 				var center: Vector2 = Vector2(float(GRID_W) * TILE_SIZE * 0.5, float(GRID_H) * TILE_SIZE * 0.5)
@@ -139,14 +146,12 @@ func _trigger_storyteller_event() -> void:
 				if hud != null and hud.has_method("notify_event"):
 					hud.call("notify_event", "Подія: До колонії приєднався %s!" % new_name)
 		3:
-			# Зміна погоди / Сонячний спалах
 			var events: PackedStringArray = PackedStringArray(["Теплова хвиля", "Похолодання", "Сонячний спалах", ""])
 			GameState.active_weather_event = events[randi() % events.size()]
 			if hud != null and hud.has_method("notify_event"):
 				var msg: String = "Подія: %s!" % GameState.active_weather_event if GameState.active_weather_event != "" else "Погода стабілізувалася"
 				hud.call("notify_event", msg)
 		4:
-			# Торговий караван
 			if hud != null and hud.has_method("enable_trader"):
 				hud.call("enable_trader")
 
@@ -202,18 +207,24 @@ func _process_raiders(sim_delta: float) -> void:
 		if target_pawn == null:
 			continue
 
+		var has_rifle: bool = bool(target_pawn.get_meta("has_rifle", false))
+		var has_armor: bool = bool(target_pawn.get_meta("has_armor", false))
+		var engage_range: float = 150.0 if has_rifle else 44.0
+
 		var dist: float = r.global_position.distance_to(target_pawn.global_position)
-		if dist > 42.0:
+		if dist > engage_range:
 			r.global_position += (target_pawn.global_position - r.global_position).normalized() * 78.0 * sim_delta
 		else:
 			var cd: float = float(r.get_meta("attack_cd", 0.0)) - sim_delta
 			if cd <= 0.0:
-				cd = 1.4
-				var p_hp: float = maxf(10.0, float(target_pawn.get_meta("hp", 100.0)) - 12.0)
+				cd = 1.25
+				var dmg_taken: float = 5.0 if has_armor else 12.0
+				var p_hp: float = maxf(10.0, float(target_pawn.get_meta("hp", 100.0)) - dmg_taken)
 				target_pawn.set_meta("hp", p_hp)
-				# Колоніст відповідає ударом/пострілом
+
 				var combat_skill: int = int(target_pawn.get_meta("skill_combat", 3))
-				hp -= (14.0 + float(combat_skill) * 2.5)
+				var weapon_bonus: float = 18.0 if has_rifle else 0.0
+				hp -= (14.0 + weapon_bonus + float(combat_skill) * 2.5)
 				r.set_meta("hp", hp)
 				target_pawn.set_meta("skill_combat", mini(20, combat_skill + 1))
 			r.set_meta("attack_cd", cd)
@@ -350,6 +361,9 @@ func _create_colonist_pawn(p_name: String, pos: Vector2, saved_dict: Dictionary)
 	pawn.z_index = 5
 
 	var trait_str: String = str(saved_dict.get("trait", TRAITS_POOL[randi() % TRAITS_POOL.size()]))
+	var has_armor: bool = bool(saved_dict.get("has_armor", false))
+	var has_rifle: bool = bool(saved_dict.get("has_rifle", false))
+
 	pawn.set_meta("trait", trait_str)
 	pawn.set_meta("hp", float(saved_dict.get("hp", 100.0)))
 	pawn.set_meta("mood", float(saved_dict.get("mood", 85.0)))
@@ -357,11 +371,14 @@ func _create_colonist_pawn(p_name: String, pos: Vector2, saved_dict: Dictionary)
 	pawn.set_meta("energy", float(saved_dict.get("energy", 100.0)))
 	pawn.set_meta("skill_work", int(saved_dict.get("skill_work", randi_range(3, 7))))
 	pawn.set_meta("skill_combat", int(saved_dict.get("skill_combat", randi_range(2, 6))))
+	pawn.set_meta("has_armor", has_armor)
+	pawn.set_meta("has_rifle", has_rifle)
 
 	var body: ColorRect = ColorRect.new()
+	body.name = "BodyRect"
 	body.size = Vector2(18, 22)
 	body.position = Vector2(-9, -6)
-	body.color = Color(0.82, 0.86, 0.92)
+	body.color = Color(0.28, 0.52, 0.85) if has_armor else Color(0.82, 0.86, 0.92)
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pawn.add_child(body)
 
@@ -399,7 +416,7 @@ func _build_top_bar() -> void:
 	top_status_lbl = Label.new()
 	top_status_lbl.text = " Д.1 08:00 | +18°C"
 	top_status_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top_status_lbl.add_theme_font_size_override("font_size", 14)
+	top_status_lbl.add_theme_font_size_override("font_size", 13)
 	hbox.add_child(top_status_lbl)
 
 	var btn_zoom_out: Button = Button.new()
@@ -471,7 +488,9 @@ func _save_current_colony(show_msg: bool) -> void:
 				"hunger": float(p.get_meta("hunger", 100.0)),
 				"energy": float(p.get_meta("energy", 100.0)),
 				"skill_work": int(p.get_meta("skill_work", 4)),
-				"skill_combat": int(p.get_meta("skill_combat", 3))
+				"skill_combat": int(p.get_meta("skill_combat", 3)),
+				"has_armor": bool(p.get_meta("has_armor", false)),
+				"has_rifle": bool(p.get_meta("has_rifle", false))
 			})
 	var ok: bool = GameState.save_game({"colonists": pawn_list})
 	if show_msg and top_status_lbl != null:
@@ -524,20 +543,4 @@ func _generate_nature_textures() -> void:
 		Vector2i(58, 54), Vector2i(74, 82)
 	]
 	for i: int in range(berry_coords.size()):
-		var pt: Vector2i = berry_coords[i]
-		_fill_circle_px(b_img, pt.x, pt.y, 6, Color(0.88, 0.12, 0.18))
-		_fill_px(b_img, pt.x - 2, pt.y - 2, 2, 2, Color(1.0, 0.75, 0.78))
-	nature_textures["berry"] = ImageTexture.create_from_image(b_img)
-
-	var m_img: Image = Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
-	m_img.fill(Color(0.0, 0.0, 0.0, 0.0))
-	_fill_px(m_img, 48, 66, 18, 38, Color(0.92, 0.88, 0.80))
-	_fill_circle_px(m_img, 57, 62, 28, Color(0.76, 0.24, 0.16))
-	_fill_px(m_img, 30, 64, 54, 10, Color(0.62, 0.18, 0.12))
-	_fill_circle_px(m_img, 46, 50, 4, Color(0.98, 0.96, 0.92))
-	_fill_circle_px(m_img, 66, 48, 4, Color(0.98, 0.96, 0.92))
-	_fill_circle_px(m_img, 56, 40, 3, Color(0.98, 0.96, 0.92))
-	_fill_px(m_img, 82, 82, 12, 24, Color(0.90, 0.86, 0.78))
-	_fill_circle_px(m_img, 88, 78, 18, Color(0.82, 0.46, 0.18))
-	_fill_px(m_img, 70, 80, 36, 6, Color(0.68, 0.36, 0.12))
-	nature_textures["mushroom"] = ImageTexture.cr
+		var pt: Vector2i = berry_coords[i
