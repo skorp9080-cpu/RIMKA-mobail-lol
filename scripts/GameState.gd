@@ -56,8 +56,23 @@ func _ready() -> void:
 	randomize()
 	planet_seed = randi() % 99999
 
+func reset_for_new_colony() -> void:
+	is_loading_save = false
+	loaded_save_data = {}
+	current_day = 1
+	game_time_hours = 8.0
+	time_speed = 1.0
+	active_weather_event = ""
+	ambient_temp = int(round(selected_temp))
+	unlocked_techs = ["basic_survival"]
+	active_research_id = "electricity"
+	research_progress = 0.0
+
 func has_tech(tech_id: String) -> bool:
 	return unlocked_techs.has(tech_id)
+
+func has_save() -> bool:
+	return FileAccess.file_exists(SAVE_PATH)
 
 func save_game(extra_data: Dictionary = {}) -> bool:
 	var hud: Node = get_tree().root.get_node_or_null("MobileHUD")
@@ -97,7 +112,7 @@ func save_game(extra_data: Dictionary = {}) -> bool:
 	return true
 
 func load_game() -> bool:
-	if not FileAccess.file_exists(SAVE_PATH):
+	if not has_save():
 		return false
 	var file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.READ)
 	if file == null:
