@@ -41,19 +41,12 @@ jobs:
           yes | sdkmanager --sdk_root="$SDK_DIR" --licenses >/dev/null || true
           sdkmanager --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" >/dev/null
 
-          JAVA_BIN="$(readlink -f "$(which java)")"
-          JAVA_DIR="$(dirname "$(dirname "$JAVA_BIN")")"
-
-          HOME=/root godot --headless --quit || true
-          HOME=/github/home godot --headless --quit || true
+          JAVA_DIR="$(dirname "$(dirname "$(readlink -f "$(which javac)")")")"
+          echo "Detected JAVA_DIR: $JAVA_DIR"
 
           for cfg_dir in /root/.config/godot /github/home/.config/godot; do
             for fname in editor_settings-4.tres editor_settings-4.editor_settings; do
-              target="$cfg_dir/$fname"
-              if [ ! -f "$target" ]; then
-                printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n\n' > "$target"
-              fi
-              printf 'export/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/debug_keystore = "%s"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$SDK_DIR" "$JAVA_DIR" "$KEYSTORE_PATH" >> "$target"
+              printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/debug_keystore = "%s"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$SDK_DIR" "$JAVA_DIR" "$KEYSTORE_PATH" > "$cfg_dir/$fname"
             done
           done
 
