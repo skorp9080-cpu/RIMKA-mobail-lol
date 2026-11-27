@@ -56,9 +56,65 @@ jobs:
             done
           done
 
+          if ! grep -q "import_etc2_astc=true" project.godot; then
+            if grep -q "^\[rendering\]" project.godot; then
+              sed -i '/^\[rendering\]/a textures/vram_compression/import_etc2_astc=true' project.godot
+            else
+              printf '\n[rendering]\n\ntextures/vram_compression/import_etc2_astc=true\n' >> project.godot
+            fi
+          fi
+
+          printf '%s\n' \
+            '[preset.0]' \
+            '' \
+            'name="Android"' \
+            'platform="Android"' \
+            'runnable=true' \
+            'dedicated_server=false' \
+            'custom_features=""' \
+            'export_filter="all_resources"' \
+            'include_filter=""' \
+            'exclude_filter=""' \
+            'export_path="build/android/RimWorldColony.apk"' \
+            'encryption_include_filters=""' \
+            'encryption_exclude_filters=""' \
+            'encrypt_pck=false' \
+            'encrypt_directory=false' \
+            '' \
+            '[preset.0.options]' \
+            '' \
+            'custom_template/debug=""' \
+            'custom_template/release=""' \
+            'gradle_build/use_gradle_build=false' \
+            'gradle_build/export_format=0' \
+            'gradle_build/min_sdk=""' \
+            'gradle_build/target_sdk=""' \
+            'architectures/armeabi-v7a=false' \
+            'architectures/arm64-v8a=true' \
+            'architectures/x86=false' \
+            'architectures/x86_64=false' \
+            'version/code=1' \
+            'version/name="1.0"' \
+            'package/unique_name="com.denys.rimworldcolony"' \
+            'package/name="RimWorld Colony"' \
+            'package/signed=true' \
+            'keystore/debug="/root/.android/debug.keystore"' \
+            'keystore/debug_user="androiddebugkey"' \
+            'keystore/debug_password="android"' \
+            'keystore/release=""' \
+            'keystore/release_user=""' \
+            'keystore/release_password=""' \
+            'screen/immersive_mode=true' \
+            'screen/support_small=true' \
+            'screen/support_normal=true' \
+            'screen/support_large=true' \
+            'screen/support_xlarge=true' \
+            > export_presets.cfg
+
       - name: Export Debug APK
         run: |
           mkdir -p build/android
+          godot --headless --import || true
           godot --headless --export-debug "Android" build/android/RimWorldColony.apk
 
       - name: Upload APK Artifact
