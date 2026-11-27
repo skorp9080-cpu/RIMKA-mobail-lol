@@ -21,7 +21,7 @@ jobs:
 
       - name: Normalize project.godot
         run: |
-          set -euo pipefail
+          set -e
           python3 - <<'PY'
           from pathlib import Path
 
@@ -29,7 +29,6 @@ jobs:
           text = p.read_text(encoding="utf-8")
           lines = [line.rstrip("\r") for line in text.splitlines()]
 
-          # Прибираємо дублікати в [display] і додаємо потрібні параметри
           cleaned = []
           section = ""
           seen_stretch_mode = False
@@ -70,7 +69,6 @@ jobs:
 
               cleaned.append(line)
 
-          # Якщо якась секція була останньою або відсутня
           if section == "display" and not seen_stretch_mode:
               cleaned.append('window/stretch/mode="canvas_items"')
           elif section == "input_devices" and not has_mouse_from_touch:
@@ -97,7 +95,7 @@ jobs:
 
       - name: Setup environment and templates
         run: |
-          set -euo pipefail
+          set -e
           SDK_DIR="${ANDROID_SDK_ROOT}"
           KEYSTORE_PATH="/root/.android/debug.keystore"
           TPL_ROOT="/root/.local/share/godot/export_templates/4.2.2.stable"
@@ -161,5 +159,33 @@ jobs:
           architectures/x86=false
           architectures/x86_64=false
           version/code=1
-          version/name="1
+          version/name="1.0"
+          package/unique_name="com.denys.rimworldcolony"
+          package/name="RimWorld Colony"
+          package/signed=true
+          keystore/debug="$KEYSTORE_PATH"
+          keystore/debug_user="androiddebugkey"
+          keystore/debug_password="android"
+          keystore/release=""
+          keystore/release_user=""
+          keystore/release_password=""
+          screen/immersive_mode=true
+          screen/support_small=true
+          screen/support_normal=true
+          screen/support_large=true
+          screen/support_xlarge=true
+          EOF
+
+      - name: Export Debug APK
+        run: |
+          set -e
+          mkdir -p build/android .godot/editor
+          godot --headless --import
+          godot --headless --export-debug "Android" build/android/RimWorldColony.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RimWorldColony-Android-APK
+          path: build/android/RimWorldColony.apk
           
