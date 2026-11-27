@@ -1,4 +1,4 @@
-extends control
+extends Control
 
 enum ScreenState { MAIN_MENU, STORYTELLER, WORLD_MAP, COLONY }
 var state: ScreenState = ScreenState.MAIN_MENU
