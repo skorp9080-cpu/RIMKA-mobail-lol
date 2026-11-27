@@ -100,18 +100,19 @@ jobs:
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
           echo "JAVA_HOME=$JAVA_DIR" >> "$GITHUB_ENV"
 
-      - name: Export Debug APK
+            - name: Export Debug APK
         run: |
           mkdir -p build/android
           godot --headless --export-debug "Android" build/android/RimWorldColony.apk > /tmp/godot_export.log 2>&1 || {
-            cat /tmp/godot_export.log
+            echo "=== GODOT ERRORS ==="
+            grep -nE "ERROR:|SCRIPT ERROR:|Cannot export|failed" /tmp/godot_export.log 2>&1 || head -n 40 /tmp/godot_export.log
+            echo "=== PROJECT.GODOT ==="
+            grep -nE "main_scene|icon|rendering" project.godot 2>&1 || true
             echo "=== SDK CHECK ==="
-            ls -la /usr/local/android-sdk /usr/local/android-sdk/platforms /usr/local/android-sdk/build-tools 2>&1 || true
-            echo "=== PRESET CHECK ==="
-            pwd
-            cat export_presets.cfg 2>&1 || true
+            ls -la /usr/local/android-sdk/platforms /usr/local/android-sdk/build-tools 2>&1 || true
             exit 1
           }
+          
           
 
       - name: Upload APK Artifact
