@@ -213,6 +213,15 @@ func _clear_ui() -> void:
 	for child in ui_root.get_children():
 		child.queue_free()
 	tool_buttons.clear()
+	top_res_label = null
+	time_label = null
+	randy_label = null
+	inspector_label = null
+	pawn_card_panel = null
+	pawn_card_label = null
+	work_panel = null
+	work_vbox = null
+	letter_box = null
 
 func _switch_screen(new_state: ScreenState) -> void:
 	state = new_state
@@ -578,85 +587,4 @@ func _build_colony_ui() -> void:
 
 	top_res_label = Label.new()
 	top_res_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	thbox.add_child(top_res_label)
-
-	time_label = Label.new()
-	thbox.add_child(time_label)
-
-	randy_label = Label.new()
-	randy_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.25))
-	thbox.add_ch
-
-func _trigger_randy_event() -> void:
-	randy_chaos_level = clampi(randy_chaos_level + randi_range(-10, 15), 10, 100)
-	if letter_box != null:
-		var lbl := Label.new()
-		lbl.text = "Ренді: щось трапилось (хаос %d)" % randy_chaos_level
-		letter_box.add_child(lbl)
-
-func _update_pawns(delta: float) -> void:
-	for p in pawns:
-		p["hunger"] = maxf(0.0, float(p["hunger"]) - delta * 0.25)
-
-func _update_top_hud() -> void:
-	if top_res_label != null:
-		top_res_label.text = "Дерево: %d  Сталь: %d  Їжа: %d  Медикаменти: %d" % [
-			resources.get("wood", 0),
-			resources.get("steel", 0),
-			resources.get("food", 0),
-			resources.get("medicine", 0)
-		]
-	if time_label != null:
-		var h := int(game_hours) % 24
-		var m := int((game_hours - floor(game_hours)) * 60.0)
-		time_label.text = "День %d • %02d:%02d" % [day_count, h, m]
-	if randy_label != null:
-		randy_label.text = "%s (%d)" % [GameState.storyteller, randy_chaos_level]
-
-func _draw_colony() -> void:
-	if colony_canvas == null or terrain_grid.is_empty():
-		return
-	var center := colony_canvas.size * 0.5
-	var terrain_names := ["grass", "soil", "sand", "snow", "water"]
-	for y in range(MAP_H):
-		for x in range(MAP_W):
-			var screen_pos := (Vector2(x * TILE_SIZE, y * TILE_SIZE) - cam_pos) * cam_zoom + center
-			var rect := Rect2(screen_pos, Vector2(TILE_SIZE * cam_zoom, TILE_SIZE * cam_zoom))
-			if not Rect2(Vector2.ZERO, colony_canvas.size).intersects(rect):
-				continue
-			var t_idx: int = terrain_grid[y][x]
-			var t_key: String = terrain_names[clampi(t_idx, 0, terrain_names.size() - 1)]
-			if tex_map.has(t_key):
-				colony_canvas.draw_texture_rect(tex_map[t_key], rect, false)
-			if stockpile_grid[y][x]:
-				colony_canvas.draw_rect(rect, Color(0.95, 0.85, 0.2, 0.22), true)
-
-	for i in range(pawns.size()):
-		var p: Dictionary = pawns[i]
-		var p_pos: Vector2 = (p["pos"] - cam_pos) * cam_zoom + center
-		var p_rect := Rect2(p_pos - Vector2(32, 32) * cam_zoom, Vector2(TILE_SIZE, TILE_SIZE) * cam_zoom)
-		if tex_map.has("pawn"):
-			colony_canvas.draw_texture_rect(tex_map["pawn"], p_rect, false)
-		if show_alt_labels:
-			colony_canvas.draw_string(ThemeDB.fallback_font, p_pos + Vector2(-24, -36) * cam_zoom, str(p["name"]))
-
-func _on_colony_input(event: InputEvent) -> void:
-	if colony_canvas == null:
-		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed:
-			is_dragging = true
-			drag_moved = false
-			touch_start_pos = event.position
-			last_drag_pos = event.position
-		else:
-			is_dragging = false
-	elif event is InputEventMouseMotion and is_dragging:
-		var delta_pos: Vector2 = event.position - last_drag_pos
-		if delta_pos.length() > 4.0:
-			drag_moved = true
-		cam_pos -= delta_pos / cam_zoom
-		cam_pos.x = clampf(cam_pos.x, 0.0, MAP_W * TILE_SIZE)
-		cam_pos.y = clampf(cam_pos.y, 0.0, MAP_H * TILE_SIZE)
-		last_drag_pos = event.position
-		colony_canvas.queue_redraw()
+	thbox.add_child(
