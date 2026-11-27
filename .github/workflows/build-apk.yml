@@ -22,76 +22,77 @@ jobs:
       - name: Normalize project.godot
         run: |
           set -e
-          python3 - <<'PY'
-          from pathlib import Path
+          awk '
+          BEGIN {
+            section = ""
+            seen_stretch_mode = 0
+            has_mouse_from_touch = 0
+            has_etc2_astc = 0
+            has_input_sec = 0
+            has_render_sec = 0
+          }
+          function flush_section(sec) {
+            if (sec == "display" && !seen_stretch_mode) {
+              print "window/stretch/mode=\"canvas_items\""
+              seen_stretch_mode = 1
+            } else if (sec == "input_devices" && !has_mouse_from_touch) {
+              print "pointing/emulate_mouse_from_touch=true"
+              has_mouse_from_touch = 1
+            } else if (sec == "rendering" && !has_etc2_astc) {
+              print "textures/vram_compression/import_etc2_astc=true"
+              has_etc2_astc = 1
+            }
+          }
+          {
+            sub(/\r$/, "")
+            line = $0
+            trimmed = line
+            gsub(/^[ \t]+|[ \t]+$/, "", trimmed)
 
-          p = Path("project.godot")
-          text = p.read_text(encoding="utf-8")
-          lines = [line.rstrip("\r") for line in text.splitlines()]
+            if (trimmed ~ /^\[.*\]$/) {
+              flush_section(section)
+              section = substr(trimmed, 2, length(trimmed) - 2)
+              if (section == "input_devices") has_input_sec = 1
+              if (section == "rendering") has_render_sec = 1
+              print line
+              next
+            }
 
-          cleaned = []
-          section = ""
-          seen_stretch_mode = False
-          has_mouse_from_touch = False
-          has_etc2_astc = False
+            if (section == "display" && line ~ /^window\/stretch\/mode=/) {
+              if (seen_stretch_mode) next
+              seen_stretch_mode = 1
+            }
 
-          for line in lines:
-              s = line.strip()
-              if s.startswith("[") and s.endswith("]"):
-                  if section == "display":
-                      if not seen_stretch_mode:
-                          cleaned.append('window/stretch/mode="canvas_items"')
-                          seen_stretch_mode = True
-                  elif section == "input_devices":
-                      if not has_mouse_from_touch:
-                          cleaned.append("pointing/emulate_mouse_from_touch=true")
-                          has_mouse_from_touch = True
-                  elif section == "rendering":
-                      if not has_etc2_astc:
-                          cleaned.append("textures/vram_compression/import_etc2_astc=true")
-                          has_etc2_astc = True
+            if (section == "input_devices" && line ~ /^pointing\/emulate_mouse_from_touch=/) {
+              has_mouse_from_touch = 1
+            }
 
-                  section = s[1:-1]
-                  cleaned.append(line)
-                  continue
+            if (section == "rendering" && line ~ /^textures\/vram_compression\/import_etc2_astc=/) {
+              line = "textures/vram_compression/import_etc2_astc=true"
+              has_etc2_astc = 1
+            }
 
-              if section == "display" and line.startswith("window/stretch/mode="):
-                  if seen_stretch_mode:
-                      continue
-                  seen_stretch_mode = True
-
-              if section == "input_devices" and line.startswith("pointing/emulate_mouse_from_touch="):
-                  has_mouse_from_touch = True
-
-              if section == "rendering" and line.startswith("textures/vram_compression/import_etc2_astc="):
-                  line = "textures/vram_compression/import_etc2_astc=true"
-                  has_etc2_astc = True
-
-              cleaned.append(line)
-
-          if section == "display" and not seen_stretch_mode:
-              cleaned.append('window/stretch/mode="canvas_items"')
-          elif section == "input_devices" and not has_mouse_from_touch:
-              cleaned.append("pointing/emulate_mouse_from_touch=true")
-          elif section == "rendering" and not has_etc2_astc:
-              cleaned.append("textures/vram_compression/import_etc2_astc=true")
-
-          result = "\n".join(cleaned)
-          if "[input_devices]" not in result:
-              result += '\n\n[input_devices]\n\npointing/emulate_touch_from_mouse=true\npointing/emulate_mouse_from_touch=true\n'
-          elif not has_mouse_from_touch and section != "input_devices":
-              result = result.replace("[input_devices]\n", "[input_devices]\npointing/emulate_mouse_from_touch=true\n", 1)
-
-          if "[rendering]" not in result:
-              result += '\n\n[rendering]\n\nrenderer/rendering_method="mobile"\ntextures/canvas_textures/default_texture_filter=0\ntextures/vram_compression/import_etc2_astc=true\n'
-          elif not has_etc2_astc and section != "rendering":
-              result = result.replace("[rendering]\n", "[rendering]\ntextures/vram_compression/import_etc2_astc=true\n", 1)
-
-          if not result.endswith("\n"):
-              result += "\n"
-
-          p.write_text(result, encoding="utf-8")
-          PY
+            print line
+          }
+          END {
+            flush_section(section)
+            if (!has_input_sec) {
+              print ""
+              print "[input_devices]"
+              print ""
+              print "pointing/emulate_touch_from_mouse=true"
+              print "pointing/emulate_mouse_from_touch=true"
+            }
+            if (!has_render_sec) {
+              print ""
+              print "[rendering]"
+              print ""
+              print "renderer/rendering_method=\"mobile\""
+              print "textures/canvas_textures/default_texture_filter=0"
+              print "textures/vram_compression/import_etc2_astc=true"
+            }
+          }
+          ' project.godot > project.godot.tmp && mv project.godot.tmp project.godot
 
       - name: Setup environment and templates
         run: |
