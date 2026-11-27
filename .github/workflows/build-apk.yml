@@ -39,7 +39,7 @@ jobs:
           cp -r "$TPL_ROOT"/* "$TPL_ALT/"
 
           yes | sdkmanager --sdk_root="$SDK_DIR" --licenses >/dev/null || true
-          sdkmanager --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "platforms;android-34" "build-tools;34.0.0" >/dev/null
 
           JAVA_BIN_PATH="$(readlink -f "$(which java)")"
           JAVA_DIR="$(dirname "$(dirname "$JAVA_BIN_PATH")")"
@@ -61,6 +61,9 @@ jobs:
 
       - name: Export Debug APK
         run: |
+          mkdir -p build/android
+          ls -la /root/.local/share/godot/export_templates/4.2.2.stable | head -n 15
+          tail -n 12 export_presets.cfg || true
           godot --headless --verbose --export-debug "Android" build/android/RimWorldColony.apk
 
       - name: Upload APK Artifact
