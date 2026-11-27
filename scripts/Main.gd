@@ -580,5 +580,8 @@ func _build_colony_ui() -> void:
 	alt_btn.text = "ALT"
 	alt_btn.custom_minimum_size = Vector2(54, 40)
 	alt_btn.pressed.connect(func():
-		show_alt_labels = not show_alt_labels
-		colon
+	show_alt_labels = not show_alt_labels
+	colony_canvas.queue_redraw()
+	)
+    thbox.add_child(alt_btn)
+
