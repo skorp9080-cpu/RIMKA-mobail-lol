@@ -49,11 +49,52 @@ jobs:
           cp /root/.config/godot/editor_settings-4.tres /github/home/.config/godot/editor_settings-4.tres
           cp /root/.config/godot/editor_settings-4.tres /github/home/.config/godot/editor_settings-4.editor_settings
 
-          if [ -f "export_presets.cfg" ]; then
-            grep -v '^keystore/debug=' export_presets.cfg | grep -v '^keystore/debug_user=' | grep -v '^keystore/debug_password=' > /tmp/export_presets.tmp
-            printf 'keystore/debug="%s"\nkeystore/debug_user="androiddebugkey"\nkeystore/debug_password="android"\n' "$KEYSTORE_PATH" >> /tmp/export_presets.tmp
-            mv /tmp/export_presets.tmp export_presets.cfg
-          fi
+          cat <<EOF > export_presets.cfg
+[preset.0]
+
+name="Android"
+platform="Android"
+runnable=true
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/android/RimWorldColony.apk"
+encryption_include_filters=""
+encryption_exclude_filters=""
+encrypt_pck=false
+encrypt_directory=false
+
+[preset.0.options]
+
+custom_template/debug=""
+custom_template/release=""
+gradle_build/use_gradle_build=false
+gradle_build/export_format=0
+gradle_build/min_sdk=""
+gradle_build/target_sdk=""
+architectures/armeabi-v7a=false
+architectures/arm64-v8a=true
+architectures/x86=false
+architectures/x86_64=false
+version/code=1
+version/name="1.0"
+package/unique_name="com.denys.rimworldcolony"
+package/name="RimWorld Colony"
+package/signed=true
+keystore/debug="$KEYSTORE_PATH"
+keystore/debug_user="androiddebugkey"
+keystore/debug_password="android"
+keystore/release=""
+keystore/release_user=""
+keystore/release_password=""
+screen/immersive_mode=true
+screen/support_small=true
+screen/support_normal=true
+screen/support_large=true
+screen/support_xlarge=true
+EOF
 
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
@@ -62,8 +103,8 @@ jobs:
       - name: Export Debug APK
         run: |
           mkdir -p build/android
-          ls -la /root/.local/share/godot/export_templates/4.2.2.stable | head -n 15
-          tail -n 12 export_presets.cfg || true
+          ls -la /root/.android/debug.keystore /root/.local/share/godot/export_templates/4.2.2.stable/android_debug.apk
+          grep -n "keystore/debug=" export_presets.cfg || true
           godot --headless --verbose --export-debug "Android" build/android/RimWorldColony.apk
 
       - name: Upload APK Artifact
