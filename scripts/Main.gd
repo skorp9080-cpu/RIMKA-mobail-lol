@@ -1,4 +1,4 @@
-extends Control
+extends control
 
 enum ScreenState { MAIN_MENU, STORYTELLER, WORLD_MAP, COLONY }
 var state: ScreenState = ScreenState.MAIN_MENU
@@ -59,6 +59,23 @@ func _ready() -> void:
 	ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(ui_root)
 	_switch_screen(ScreenState.MAIN_MENU)
+
+func _process(delta: float) -> void:
+	if state != ScreenState.COLONY or game_speed <= 0.0:
+		return
+	var dt := delta * game_speed
+	game_hours += dt * 0.25
+	if game_hours >= 24.0:
+		game_hours -= 24.0
+		day_count += 1
+	randy_timer -= dt
+	if randy_timer <= 0.0:
+		_trigger_randy_event()
+		randy_timer = randf_range(16.0, 34.0)
+	_update_pawns(dt)
+	_update_top_hud()
+	if colony_canvas != null:
+		colony_canvas.queue_redraw()
 
 func _generate_procedural_textures() -> void:
 	var s := TILE_SIZE
@@ -568,207 +585,4 @@ func _build_colony_ui() -> void:
 
 	randy_label = Label.new()
 	randy_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.25))
-	thbox.add_child(randy_label)
-
-	var trigger_randy_btn := Button.new()
-	trigger_randy_btn.text = "🎲 Хаос"
-	trigger_randy_btn.custom_minimum_size = Vector2(86, 40)
-	trigger_randy_btn.pressed.connect(_trigger_randy_event)
-	thbox.add_child(trigger_randy_btn)
-
-	var alt_btn := Button.new()
-	alt_btn.text = "ALT"
-	alt_btn.custom_minimum_size = Vector2(54, 40)
-	alt_btn.pressed.connect(func():
-		show_alt_labels = not show_alt_labels
-		colony_canvas.queue_redraw()
-	)
-	thbox.add_child(alt_btn)
-func _trigger_randy_event() -> void:
-	var events := [
-		func():
-			resources["food"] += 25
-			_add_letter("Ренді скинув транспортну капсулу з +25 їжі."),
-		func():
-			resources["steel"] += 30
-			_add_letter("Знайдено уламки з +30 сталі."),
-		func():
-			resources["wood"] += 35
-			_add_letter("Ренді пригнав +35 деревини."),
-		func():
-			_add_letter("Ренді просто посміхнувся. Тиша перед бурею.")
-	]
-	var idx := randi() % events.size()
-	events[idx].call()
-	randy_timer = randf_range(15.0, 35.0)
-	_update_hud()
-
-func _world_to_screen(world_p: Vector2) -> Vector2:
-	var center := colony_canvas.size * 0.5
-	return (world_p - cam_pos) * cam_zoom + center
-
-func _screen_to_world(screen_p: Vector2) -> Vector2:
-	var center := colony_canvas.size * 0.5
-	return (screen_p - center) / cam_zoom + cam_pos
-
-func _draw_colony() -> void:
-	if terrain_grid.is_empty():
-		return
-	var ter_keys := ["grass", "soil", "sand", "snow", "water"]
-	var obj_keys := {
-		1: "rock",
-		2: "steel_ore",
-		3: "tree",
-		4: "berry_bush",
-		5: "wall_wood",
-		6: "door",
-		7: "bed",
-		8: "campfire"
-	}
-
-	for y in range(MAP_H):
-		for x in range(MAP_W):
-			var top_left := _world_to_screen(Vector2(x * TILE_SIZE, y * TILE_SIZE))
-			var sz := Vector2(TILE_SIZE * cam_zoom, TILE_SIZE * cam_zoom)
-			if top_left.x + sz.x < 0 or top_left.y + sz.y < 0 or top_left.x > colony_canvas.size.x or top_left.y > colony_canvas.size.y:
-				continue
-
-			var t_idx: int = terrain_grid[y][x]
-			var t_key: String = ter_keys[clampi(t_idx, 0, ter_keys.size() - 1)]
-			if tex_map.has(t_key):
-				colony_canvas.draw_texture_rect(tex_map[t_key], Rect2(top_left, sz), false)
-
-			if stockpile_grid[y][x]:
-				colony_canvas.draw_rect(Rect2(top_left, sz), Color(0.9, 0.8, 0.2, 0.16), true)
-
-			var o_id: int = object_grid[y][x]
-			if obj_keys.has(o_id) and tex_map.has(obj_keys[o_id]):
-				colony_canvas.draw_texture_rect(tex_map[obj_keys[o_id]], Rect2(top_left, sz), false)
-
-			var des: int = designation_grid[y][x]
-			if des != 0:
-				colony_canvas.draw_rect(Rect2(top_left + Vector2(2, 2), sz - Vector2(4, 4)), Color(1.0, 0.65, 0.1, 0.45), true)
-
-			if show_alt_labels and o_id != 0 and obj_keys.has(o_id):
-				colony_canvas.draw_string(ThemeDB.fallback_font, top_left + Vector2(4, 14), str(obj_keys[o_id]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.85))
-
-	for i in range(pawns.size()):
-		var p: Dictionary = pawns[i]
-		var sp := _world_to_screen(p["pos"])
-		var p_sz := Vector2(TILE_SIZE * cam_zoom, TILE_SIZE * cam_zoom)
-		if tex_map.has("pawn"):
-			colony_canvas.draw_texture_rect(tex_map["pawn"], Rect2(sp - p_sz * 0.5, p_sz), false)
-		if i == selected_pawn_idx:
-			colony_canvas.draw_rect(Rect2(sp - p_sz * 0.5, p_sz), Color(0.2, 0.9, 0.4, 0.85), false, 2.0)
-		colony_canvas.draw_string(ThemeDB.fallback_font, sp + Vector2(-18, -p_sz.y * 0.5 - 4), p["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.95))
-
-func _on_colony_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			cam_zoom = clampf(cam_zoom * 1.15, 0.4, 2.5)
-			colony_canvas.queue_redraw()
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			cam_zoom = clampf(cam_zoom / 1.15, 0.4, 2.5)
-			colony_canvas.queue_redraw()
-		elif event.button_index == MOUSE_BUTTON_LEFT:
-			if event.pressed:
-				is_dragging = true
-				drag_moved = false
-				touch_start_pos = event.position
-				last_drag_pos = event.position
-			else:
-				if not drag_moved:
-					_apply_colony_tool_at(_screen_to_world(event.position))
-				is_dragging = false
-	elif event is InputEventMouseMotion and is_dragging:
-		var delta_pos: Vector2 = event.position - last_drag_pos
-		if event.position.distance_to(touch_start_pos) > 8.0:
-			drag_moved = true
-		cam_pos -= delta_pos / cam_zoom
-		cam_pos.x = clampf(cam_pos.x, 0.0, MAP_W * TILE_SIZE)
-		cam_pos.y = clampf(cam_pos.y, 0.0, MAP_H * TILE_SIZE)
-		last_drag_pos = event.position
-		colony_canvas.queue_redraw()
-func _update_hud() -> void:
-	if state != ScreenState.COLONY or top_res_label == null:
-		return
-	top_res_label.text = "🌲 %d  ⚙️ %d  🍖 %d  💊 %d" % [
-		resources.get("wood", 0),
-		resources.get("steel", 0),
-		resources.get("food", 0),
-		resources.get("medicine", 0)
-	]
-	var hr := int(game_hours) % 24
-	var mn := int((game_hours - floor(game_hours)) * 60.0)
-	time_label.text = "День %d  %02d:%02d" % [day_count, hr, mn]
-	randy_label.text = "%s (%.0fs)" % [GameState.storyteller, maxf(0.0, randy_timer)]
-
-func _add_letter(text: String) -> void:
-	if letter_box == null:
-		return
-	var l := Label.new()
-	l.text = "📩 " + text
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD
-	l.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
-	letter_box.add_child(l)
-	if letter_box.get_child_count() > 4:
-		letter_box.get_child(0).queue_free()
-
-func _apply_colony_tool_at(world_p: Vector2) -> void:
-	var gx := int(world_p.x / TILE_SIZE)
-	var gy := int(world_p.y / TILE_SIZE)
-	if gx < 0 or gy < 0 or gx >= MAP_W or gy >= MAP_H:
-		return
-
-	for i in range(pawns.size()):
-		if pawns[i]["pos"].distance_to(world_p) <= TILE_SIZE * 0.65:
-			selected_pawn_idx = i
-			_refresh_pawn_card()
-			colony_canvas.queue_redraw()
-			return
-
-	match active_tool:
-		"mine":
-			if object_grid[gy][gx] in [1, 2]:
-				designation_grid[gy][gx] = 1
-		"chop":
-			if object_grid[gy][gx] == 3:
-				designation_grid[gy][gx] = 2
-		"wall":
-			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 5:
-				resources["wood"] -= 5
-				object_grid[gy][gx] = 5
-		"door":
-			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 10:
-				resources["wood"] -= 10
-				object_grid[gy][gx] = 6
-		"bed":
-			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 25:
-				resources["wood"] -= 25
-				object_grid[gy][gx] = 7
-		"campfire":
-			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 15:
-				resources["wood"] -= 15
-				object_grid[gy][gx] = 8
-		"stockpile":
-			stockpile_grid[gy][gx] = not stockpile_grid[gy][gx]
-
-	_update_hud()
-	colony_canvas.queue_redraw()
-func _refresh_pawn_card() -> void:
-	if pawn_card_label == null or work_vbox == null:
-		return
-	for ch in work_vbox.get_children():
-		ch.queue_free()
-	if pawns.is_empty():
-		pawn_card_label.text = "Колоністів немає"
-		return
-	if selected_pawn_idx < 0 or selected_pawn_idx >= pawns.size():
-		selected_pawn_idx = 0
-	var p: Dictionary = pawns[selected_pawn_idx]
-	pawn_card_label.text = "%s\nРиса: %s\nЗадача: %s\nНастрій: %.0f%% | Їжа: %.0f%%" % [
-		p["name"], p["trait"], p["task_name"], p["mood"], p["hunger"]
-	]
-	var lbl := Label.new()
-	lbl.text = "Інструмент: " + active_tool
-	work_vbox.add_child(lbl)
+	thbox.add_ch
