@@ -19,6 +19,82 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Normalize project.godot
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("project.godot")
+          text = p.read_text(encoding="utf-8")
+          lines = [line.rstrip("\r") for line in text.splitlines()]
+
+          # Прибираємо дублікати в [display] і додаємо потрібні параметри
+          cleaned = []
+          section = ""
+          seen_stretch_mode = False
+          has_mouse_from_touch = False
+          has_etc2_astc = False
+
+          for line in lines:
+              s = line.strip()
+              if s.startswith("[") and s.endswith("]"):
+                  if section == "display":
+                      if not seen_stretch_mode:
+                          cleaned.append('window/stretch/mode="canvas_items"')
+                          seen_stretch_mode = True
+                  elif section == "input_devices":
+                      if not has_mouse_from_touch:
+                          cleaned.append("pointing/emulate_mouse_from_touch=true")
+                          has_mouse_from_touch = True
+                  elif section == "rendering":
+                      if not has_etc2_astc:
+                          cleaned.append("textures/vram_compression/import_etc2_astc=true")
+                          has_etc2_astc = True
+
+                  section = s[1:-1]
+                  cleaned.append(line)
+                  continue
+
+              if section == "display" and line.startswith("window/stretch/mode="):
+                  if seen_stretch_mode:
+                      continue
+                  seen_stretch_mode = True
+
+              if section == "input_devices" and line.startswith("pointing/emulate_mouse_from_touch="):
+                  has_mouse_from_touch = True
+
+              if section == "rendering" and line.startswith("textures/vram_compression/import_etc2_astc="):
+                  line = "textures/vram_compression/import_etc2_astc=true"
+                  has_etc2_astc = True
+
+              cleaned.append(line)
+
+          # Якщо якась секція була останньою або відсутня
+          if section == "display" and not seen_stretch_mode:
+              cleaned.append('window/stretch/mode="canvas_items"')
+          elif section == "input_devices" and not has_mouse_from_touch:
+              cleaned.append("pointing/emulate_mouse_from_touch=true")
+          elif section == "rendering" and not has_etc2_astc:
+              cleaned.append("textures/vram_compression/import_etc2_astc=true")
+
+          result = "\n".join(cleaned)
+          if "[input_devices]" not in result:
+              result += '\n\n[input_devices]\n\npointing/emulate_touch_from_mouse=true\npointing/emulate_mouse_from_touch=true\n'
+          elif not has_mouse_from_touch and section != "input_devices":
+              result = result.replace("[input_devices]\n", "[input_devices]\npointing/emulate_mouse_from_touch=true\n", 1)
+
+          if "[rendering]" not in result:
+              result += '\n\n[rendering]\n\nrenderer/rendering_method="mobile"\ntextures/canvas_textures/default_texture_filter=0\ntextures/vram_compression/import_etc2_astc=true\n'
+          elif not has_etc2_astc and section != "rendering":
+              result = result.replace("[rendering]\n", "[rendering]\ntextures/vram_compression/import_etc2_astc=true\n", 1)
+
+          if not result.endswith("\n"):
+              result += "\n"
+
+          p.write_text(result, encoding="utf-8")
+          PY
+
       - name: Setup environment and templates
         run: |
           set -euo pipefail
@@ -55,69 +131,35 @@ jobs:
             done
           done
 
-          if grep -q "textures/vram_compression/import_etc2_astc=" project.godot; then
-            sed -i 's/textures\/vram_compression\/import_etc2_astc=.*/textures\/vram_compression\/import_etc2_astc=true/' project.godot
-          elif grep -q "^\[rendering\]" project.godot; then
-            sed -i '/^\[rendering\]/a textures/vram_compression/import_etc2_astc=true' project.godot
-          else
-            printf '\n[rendering]\n\ntextures/vram_compression/import_etc2_astc=true\n' >> project.godot
-          fi
+          cat <<EOF > export_presets.cfg
+          [preset.0]
 
-          printf '%s\n' \
-            '[preset.0]' \
-            '' \
-            'name="Android"' \
-            'platform="Android"' \
-            'runnable=true' \
-            'dedicated_server=false' \
-            'custom_features=""' \
-            'export_filter="all_resources"' \
-            'include_filter=""' \
-            'exclude_filter=""' \
-            'export_path="build/android/RimWorldColony.apk"' \
-            'encryption_include_filters=""' \
-            'encryption_exclude_filters=""' \
-            'encrypt_pck=false' \
-            'encrypt_directory=false' \
-            '' \
-            '[preset.0.options]' \
-            '' \
-            'custom_template/debug=""' \
-            'custom_template/release=""' \
-            'gradle_build/use_gradle_build=false' \
-            'gradle_build/export_format=0' \
-            'architectures/armeabi-v7a=false' \
-            'architectures/arm64-v8a=true' \
-            'architectures/x86=false' \
-            'architectures/x86_64=false' \
-            'version/code=1' \
-            'version/name="1.0"' \
-            'package/unique_name="com.denys.rimworldcolony"' \
-            'package/name="RimWorld Colony"' \
-            'package/signed=true' \
-            'keystore/debug="'"$KEYSTORE_PATH"'"' \
-            'keystore/debug_user="androiddebugkey"' \
-            'keystore/debug_password="android"' \
-            'keystore/release=""' \
-            'keystore/release_user=""' \
-            'keystore/release_password=""' \
-            'screen/immersive_mode=true' \
-            'screen/support_small=true' \
-            'screen/support_normal=true' \
-            'screen/support_large=true' \
-            'screen/support_xlarge=true' \
-            > export_presets.cfg
+          name="Android"
+          platform="Android"
+          runnable=true
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="build/android/RimWorldColony.apk"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
 
-      - name: Export Debug APK
-        run: |
-          set -euo pipefail
-          mkdir -p build/android .godot/editor
-          godot --headless --import
-          godot --headless --export-debug "Android" build/android/RimWorldColony.apk
+          [preset.0.options]
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: RimWorldColony-Android-APK
-          path: build/android/RimWorldColony.apk
+          custom_template/debug=""
+          custom_template/release=""
+          gradle_build/use_gradle_build=false
+          gradle_build/export_format=0
+          gradle_build/min_sdk="24"
+          gradle_build/target_sdk="33"
+          architectures/armeabi-v7a=false
+          architectures/arm64-v8a=true
+          architectures/x86=false
+          architectures/x86_64=false
+          version/code=1
+          version/name="1
           
