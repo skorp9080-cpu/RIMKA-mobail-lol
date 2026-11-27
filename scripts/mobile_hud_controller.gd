@@ -25,7 +25,7 @@ var category_buttons: Dictionary = {}
 var items_hbox: HBoxContainer
 var btn_cancel: Button
 
-var categories_order: Array = ["orders", "walls", "floors", "furniture", "workbenches", "power"]
+var categories_order: PackedStringArray = PackedStringArray(["orders", "walls", "floors", "furniture", "workbenches", "power"])
 var category_titles: Dictionary = {
 	"orders": "Накази",
 	"walls": "Стіни",
@@ -121,7 +121,7 @@ func _process_work_orders(delta: float) -> void:
 	var all_pawns: Array = _get_all_colonists()
 	var busy_pawns: Array = []
 
-	for i in range(work_orders.size()):
+	for i: int in range(work_orders.size()):
 		var order: Dictionary = work_orders[i]
 		var w: Variant = order.get("worker", null)
 		if w != null and is_instance_valid(w) and not colonist_targets.has(w):
@@ -129,15 +129,15 @@ func _process_work_orders(delta: float) -> void:
 		else:
 			order["worker"] = null
 
-	for i in range(work_orders.size()):
+	for i: int in range(work_orders.size()):
 		var order: Dictionary = work_orders[i]
 		if order.get("worker", null) != null:
 			continue
 		var target_pos: Vector2 = order["world_pos"]
 		var best_pawn: Node2D = null
 		var best_dist: float = 999999.0
-		for p in all_pawns:
-			var p_node: Node2D = p as Node2D
+		for j: int in range(all_pawns.size()):
+			var p_node: Node2D = all_pawns[j] as Node2D
 			if p_node != null and not busy_pawns.has(p_node) and not colonist_targets.has(p_node):
 				var d: float = p_node.global_position.distance_to(target_pos)
 				if d < best_dist:
@@ -148,7 +148,7 @@ func _process_work_orders(delta: float) -> void:
 			busy_pawns.append(best_pawn)
 
 	var completed: Array = []
-	for i in range(work_orders.size()):
+	for i: int in range(work_orders.size()):
 		var order: Dictionary = work_orders[i]
 		var worker: Node2D = order.get("worker", null) as Node2D
 		if worker == null or not is_instance_valid(worker):
@@ -165,7 +165,7 @@ func _process_work_orders(delta: float) -> void:
 			if prog >= 1.0:
 				completed.append(order)
 
-	for i in range(completed.size()):
+	for i: int in range(completed.size()):
 		var done_order: Dictionary = completed[i]
 		_finish_work_order(done_order)
 		work_orders.erase(done_order)
@@ -253,7 +253,7 @@ func _try_assign_order(world_pos: Vector2) -> void:
 	var cell: Vector2i = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
 	var cell_center: Vector2 = Vector2((float(cell.x) + 0.5) * TILE_SIZE, (float(cell.y) + 0.5) * TILE_SIZE)
 
-	for i in range(work_orders.size()):
+	for i: int in range(work_orders.size()):
 		var existing: Dictionary = work_orders[i]
 		if existing["cell"] == cell:
 			status_label.text = "На цю клітинку вже призначено наказ"
@@ -317,7 +317,9 @@ func _try_assign_order(world_pos: Vector2) -> void:
 
 func _find_map_object_at_cell(root: Node, cell: Vector2i, kind: String) -> Control:
 	var cell_rect: Rect2 = Rect2(float(cell.x) * TILE_SIZE, float(cell.y) * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-	for child in root.get_children():
+	var children: Array = root.get_children()
+	for i: int in range(children.size()):
+		var child: Node = children[i]
 		if child is ColorRect:
 			var cr: ColorRect = child as ColorRect
 			if not cell_rect.has_point(cr.position + cr.size * 0.5):
@@ -332,7 +334,7 @@ func _find_map_object_at_cell(root: Node, cell: Vector2i, kind: String) -> Contr
 
 func _create_order_marker(cell: Vector2i, tex_id: String) -> TextureRect:
 	var marker: TextureRect = TextureRect.new()
-	marker.texture = item_textures.get(tex_id)
+	marker.texture = item_textures.get(tex_id) as Texture2D
 	marker.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	marker.stretch_mode = TextureRect.STRETCH_SCALE
 	marker.size = Vector2(TILE_SIZE, TILE_SIZE)
@@ -352,9 +354,10 @@ func _get_all_colonists() -> Array:
 func _find_colonist_near(pos: Vector2) -> Node2D:
 	var best_pawn: Node2D = null
 	var best_dist: float = SELECT_RADIUS
+	var all_pawns: Array = _get_all_colonists()
 
-	for item in _get_all_colonists():
-		var pawn_node: Node2D = item as Node2D
+	for i: int in range(all_pawns.size()):
+		var pawn_node: Node2D = all_pawns[i] as Node2D
 		if pawn_node != null and pawn_node != self:
 			var d: float = pawn_node.global_position.distance_to(pos)
 			if d <= best_dist:
@@ -366,8 +369,10 @@ func _collect_scene_pawns(root: Node) -> Array:
 	var result: Array = []
 	if root == null:
 		return result
-	for child in root.get_children():
-		if child is Node2D and (child.name in ["Олекса", "Соломія", "Богдан"] or child.has_node("Label")):
+	var children: Array = root.get_children()
+	for i: int in range(children.size()):
+		var child: Node = children[i]
+		if child is Node2D and (child.name == "Олекса" or child.name == "Соломія" or child.name == "Богдан" or child.has_node("Label")):
 			result.append(child)
 		result.append_array(_collect_scene_pawns(child))
 	return result
@@ -375,7 +380,7 @@ func _collect_scene_pawns(root: Node) -> Array:
 func _find_item_def(item_id: String) -> Dictionary:
 	for cat in build_catalog.keys():
 		var list: Array = build_catalog[cat]
-		for i in range(list.size()):
+		for i: int in range(list.size()):
 			var entry: Dictionary = list[i]
 			if str(entry["id"]) == item_id:
 				return entry
@@ -409,7 +414,7 @@ func _try_place_building(world_pos: Vector2) -> void:
 	stone -= c_stone
 
 	var block: TextureRect = TextureRect.new()
-	block.texture = item_textures.get(selected_build_id)
+	block.texture = item_textures.get(selected_build_id) as Texture2D
 	block.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	block.stretch_mode = TextureRect.STRETCH_SCALE
 	block.size = Vector2(TILE_SIZE, TILE_SIZE)
@@ -469,8 +474,8 @@ func _build_mobile_hud() -> void:
 	tabs_hbox.add_theme_constant_override("separation", 5)
 	root_box.add_child(tabs_hbox)
 
-	for i in range(categories_order.size()):
-		var cid: String = str(categories_order[i])
+	for i: int in range(categories_order.size()):
+		var cid: String = categories_order[i]
 		var tab_btn: Button = Button.new()
 		tab_btn.text = str(category_titles[cid])
 		tab_btn.custom_minimum_size = Vector2(95, 42)
@@ -504,11 +509,13 @@ func _select_category(cat_id: String) -> void:
 	_rebuild_item_buttons()
 
 func _rebuild_item_buttons() -> void:
-	for child in items_hbox.get_children():
-		child.queue_free()
+	var old_children: Array = items_hbox.get_children()
+	for i: int in range(old_children.size()):
+		var c: Node = old_children[i]
+		c.queue_free()
 
 	var list: Array = build_catalog.get(current_category, [])
-	for i in range(list.size()):
+	for i: int in range(list.size()):
 		var entry: Dictionary = list[i]
 		var item_id: String = str(entry["id"])
 		var btn: Button = Button.new()
@@ -516,7 +523,7 @@ func _rebuild_item_buttons() -> void:
 		if bool(entry.get("is_order", false)):
 			btn.text = str(entry["name"])
 		else:
-			var cost_parts: Array = []
+			var cost_parts: PackedStringArray = PackedStringArray()
 			if int(entry["wood"]) > 0:
 				cost_parts.append("%d дер." % int(entry["wood"]))
 			if int(entry["stone"]) > 0:
@@ -525,7 +532,7 @@ func _rebuild_item_buttons() -> void:
 				cost_parts.append("%d сталі" % int(entry["steel"]))
 			btn.text = "%s\n(%s)" % [str(entry["name"]), ", ".join(cost_parts)]
 
-		btn.icon = item_textures.get(item_id)
+		btn.icon = item_textures.get(item_id) as Texture2D
 		btn.expand_icon = true
 		btn.custom_minimum_size = Vector2(180, 72)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -554,14 +561,4 @@ func _select_build_item(item_id: String) -> void:
 func _generate_all_textures() -> void:
 	item_textures["order_chop"] = _make_order_tex(Color(0.95, 0.55, 0.15), "axe")
 	item_textures["order_mine"] = _make_order_tex(Color(0.35, 0.78, 0.95), "pickaxe")
-	item_textures["order_deconstruct"] = _make_order_tex(Color(0.92, 0.25, 0.25), "cross")
-
-	item_textures["wall_wood"] = _make_tex(Color(0.56, 0.36, 0.18), "planks")
-	item_textures["wall_stone"] = _make_tex(Color(0.52, 0.52, 0.54), "bricks")
-	item_textures["wall_steel"] = _make_tex(Color(0.45, 0.54, 0.64), "metal")
-
-	item_textures["floor_wood"] = _make_tex(Color(0.72, 0.52, 0.30), "planks")
-	item_textures["floor_stone"] = _make_tex(Color(0.68, 0.68, 0.70), "tiles")
-	item_textures["floor_steel"] = _make_tex(Color(0.60, 0.66, 0.72), "tiles")
-
-	item_text
+	item_textures["order_deconstruct"] = _make_order_tex(Color(0.
