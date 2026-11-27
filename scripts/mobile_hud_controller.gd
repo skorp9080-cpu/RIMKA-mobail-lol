@@ -30,6 +30,7 @@ var hud_layer: CanvasLayer
 var selection_ring: Line2D
 var status_label: Label
 var resources_label: Label
+var colonist_bar_hbox: HBoxContainer
 var category_buttons: Dictionary = {}
 var items_hbox: HBoxContainer
 var btn_cancel: Button
@@ -45,7 +46,7 @@ var category_titles: Dictionary = {
 	"power": "Енергія",
 	"gear": "Зброя",
 	"research": "Наука",
-	"trade": "Торгівля"
+	"trade": "Крафт/Торг"
 }
 
 var tech_catalog: Array = [
@@ -60,6 +61,8 @@ var build_catalog: Dictionary = {
 		{"id": "order_chop", "name": "Рубати дерево", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
 		{"id": "order_mine", "name": "Копати скелю", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
 		{"id": "order_harvest", "name": "Збирати їжу", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
+		{"id": "order_hunt", "name": "Полювати", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
+		{"id": "order_tame", "name": "Приручити", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
 		{"id": "order_deconstruct", "name": "Розібрати", "wood": 0, "steel": 0, "stone": 0, "is_order": true}
 	],
 	"farm": [
@@ -105,6 +108,7 @@ func _ready() -> void:
 	_generate_all_textures()
 	_create_selection_ring()
 	_build_mobile_hud()
+	rebuild_colonist_bar()
 	_select_category("orders")
 	_refresh_resource_bar()
 
@@ -113,6 +117,31 @@ func _is_colony_scene() -> bool:
 	if scene == null:
 		return false
 	return scene.name != "MainMenu" and not scene.scene_file_path.ends_with("MainMenu.tscn")
+
+func rebuild_colonist_bar() -> void:
+	if colonist_bar_hbox == null:
+		return
+	var old_btns: Array = colonist_bar_hbox.get_children()
+	for i: int in range(old_btns.size()):
+		old_btns[i].queue_free()
+
+	var pawns: Array = _get_all_colonists()
+	for i: int in range(pawns.size()):
+		var p: Node2D = pawns[i] as Node2D
+		if p == null or not is_instance_valid(p):
+			continue
+		var btn: Button = Button.new()
+		btn.text = p.name
+		btn.custom_minimum_size = Vector2(78, 30)
+		btn.add_theme_font_size_override("font_size", 12)
+		btn.pressed.connect(func():
+			selected_colonist = p
+			var sc: Node = get_tree().current_scene
+			if sc != null and sc.has_method("focus_on_colonist"):
+				sc.call("focus_on_colonist", p)
+			notify_event("Камера наведена на %s" % p.name)
+		)
+		colonist_bar_hbox.add_child(btn)
 
 func get_climate_offset() -> int:
 	if GameState.active_weather_event == "Сонячний спалах" or stored_power_wh <= 5.0:
@@ -149,7 +178,7 @@ func grant_drop_pod() -> void:
 
 func enable_trader() -> void:
 	trader_available = true
-	notify_event("Подія: Прибув торговий караван! Відкрийте вкладку «Торгівля»")
+	notify_event("Подія: Прибув торговий караван! Відкрийте вкладку «Крафт/Торг»")
 	if current_category == "trade":
 		_rebuild_item_buttons()
 
@@ -421,7 +450,7 @@ func _process_work_orders(sim_delta: float) -> void:
 			var o_type: String = str(order["type"])
 			var w_skill: float = float(worker.get_meta("skill_work", 4))
 			var trait_mult: float = 1.25 if str(worker.get_meta("trait", "")) == "Працьовитий" else 1.0
-			var base_spd: float = 0.50 if o_type == "order_chop" else (0.35 if o_type == "order_mine" else 0.72)
+			var base_spd: float = 0.50 if o_type == "order_chop" else (0.35 if o_type == "order_mine" else 0.68)
 			var speed: float = base_spd * (1.0 + w_skill * 0.06) * trait_mult
 			var prog: float = float(order.get("progress", 0.0)) + sim_delta * speed
 			order["progress"] = prog
@@ -471,6 +500,17 @@ func _finish_work_order(order: Dictionary) -> void:
 				target_node.queue_free()
 			food += gain
 			notify_event("Зібрано лісовий врожай (+%d їжі)" % gain)
+		"order_hunt":
+			if target_node != null and is_instance_valid(target_node):
+				var kind: String = str(target_node.get_meta("kind", "deer"))
+				var meat: int = 35 if kind == "boar" else 28
+				food += meat
+				target_node.queue_free()
+				notify_event("Успішне полювання! Добуто +%d їжі" % meat)
+		"order_tame":
+			if target_node != null and is_instance_valid(target_node):
+				target_node.set_meta("tamed", true)
+				notify_event("Тварину приручено! Тепер вона допомагає колонії")
 		"order_deconstruct":
 			if placed_cells.has(cell):
 				var b_node: Node = placed_cells[cell] as Node
@@ -481,53 +521,4 @@ func _finish_work_order(order: Dictionary) -> void:
 			elif placed_floors.has(cell):
 				var f_node: Node = placed_floors[cell] as Node
 				var f_id: String = str(f_node.get_meta("build_id", ""))
-				_refund_resources(f_id)
-				f_node.queue_free()
-				placed_floors.erase(cell)
-			notify_event("Об'єкт розібрано!")
-	_refresh_resource_bar()
-
-func _refund_resources(item_id: String) -> void:
-	var def: Dictionary = _find_item_def(item_id)
-	if def.is_empty():
-		return
-	wood += int(int(def["wood"]) * 0.5)
-	steel += int(int(def["steel"]) * 0.5)
-	stone += int(int(def["stone"]) * 0.5)
-
-func _unhandled_input(event: InputEvent) -> void:
-	if not _is_colony_scene():
-		return
-
-	var tapped: bool = false
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		tapped = true
-	elif event is InputEventScreenTouch and event.pressed:
-		tapped = true
-
-	if not tapped:
-		return
-
-	var world_pos: Vector2 = get_global_mouse_position()
-
-	if selected_build_id != "":
-		if selected_build_id.begins_with("order_"):
-			_try_assign_order(world_pos)
-		else:
-			_try_place_building(world_pos)
-		return
-
-	var clicked_pawn: Node2D = _find_colonist_near(world_pos)
-	if clicked_pawn != null:
-		selected_colonist = clicked_pawn
-		var tr_str: String = str(clicked_pawn.get_meta("trait", ""))
-		var sk_w: int = int(clicked_pawn.get_meta("skill_work", 4))
-		var sk_c: int = int(clicked_pawn.get_meta("skill_combat", 3))
-		notify_event("%s [%s] | Праця:%d Бій:%d — тапніть по землі для руху" % [clicked_pawn.name, tr_str, sk_w, sk_c])
-		return
-
-	if is_instance_valid(selected_colonist):
-		colonist_targets[selected_colonist] = world_pos
-		notify_event("%s прямує до точки..." % selected_colonist.name)
-
-func _try_assign_order(world_pos: Vector2) -> voi
+				_refund_resources(
