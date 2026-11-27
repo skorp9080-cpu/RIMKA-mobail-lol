@@ -49,8 +49,10 @@ jobs:
           cp /root/.config/godot/editor_settings-4.tres /github/home/.config/godot/editor_settings-4.tres
           cp /root/.config/godot/editor_settings-4.tres /github/home/.config/godot/editor_settings-4.editor_settings
 
-          cat <<EOF > export_presets.cfg
-[preset.0]
+          python3 - << 'PYEOF'
+          import os
+          ks = os.environ.get("KEYSTORE_PATH", "/root/.android/debug.keystore")
+          content = f"""[preset.0]
 
 name="Android"
 platform="Android"
@@ -83,7 +85,7 @@ version/name="1.0"
 package/unique_name="com.denys.rimworldcolony"
 package/name="RimWorld Colony"
 package/signed=true
-keystore/debug="$KEYSTORE_PATH"
+keystore/debug="{ks}"
 keystore/debug_user="androiddebugkey"
 keystore/debug_password="android"
 keystore/release=""
@@ -94,7 +96,10 @@ screen/support_small=true
 screen/support_normal=true
 screen/support_large=true
 screen/support_xlarge=true
-EOF
+"""
+          with open("export_presets.cfg", "w", encoding="utf-8") as f:
+              f.write(content)
+          PYEOF
 
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
