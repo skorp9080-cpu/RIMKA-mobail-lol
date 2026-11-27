@@ -1,16 +1,15 @@
 extends Node2D
 
-const TILE_SIZE := 32.0
-const SELECT_RADIUS := 36.0
+const TILE_SIZE: float = 32.0
+const SELECT_RADIUS: float = 36.0
 
 enum BuildMode { NONE, WALL, BED, STORAGE }
 
 var current_build_mode: BuildMode = BuildMode.NONE
 var selected_colonist: Node2D = null
-var colonist_targets: Dictionary = {} # Node2D -> Vector2
-var placed_cells: Dictionary = {}    # Vector2i -> Node2D
+var colonist_targets: Dictionary = {}
+var placed_cells: Dictionary = {}
 
-# Стартові ресурси (можна прив'язати до твого менеджера ресурсів)
 var wood: int = 200
 var steel: int = 140
 
@@ -27,20 +26,19 @@ func _ready() -> void:
 	_refresh_buttons()
 
 func _physics_process(delta: float) -> void:
-	# Рухаємо всіх колоністів, яким задано ціль тапом
 	for pawn in colonist_targets.keys():
 		if not is_instance_valid(pawn):
 			colonist_targets.erase(pawn)
 			continue
+		var pawn_node: Node2D = pawn as Node2D
 		var target: Vector2 = colonist_targets[pawn]
-		var to_target := target - pawn.global_position
+		var to_target: Vector2 = target - pawn_node.global_position
 		if to_target.length() <= 4.0:
-			pawn.global_position = target
+			pawn_node.global_position = target
 			colonist_targets.erase(pawn)
 		else:
-			pawn.global_position += to_target.normalized() * 110.0 * delta
+			pawn_node.global_position += to_target.normalized() * 110.0 * delta
 
-	# Оновлюємо рамку навколо вибраного колоніста
 	if is_instance_valid(selected_colonist):
 		selection_ring.visible = true
 		selection_ring.global_position = selected_colonist.global_position
@@ -49,7 +47,7 @@ func _physics_process(delta: float) -> void:
 		selection_ring.visible = false
 
 func _unhandled_input(event: InputEvent) -> void:
-	var tapped := false
+	var tapped: bool = false
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		tapped = true
 	elif event is InputEventScreenTouch and event.pressed:
@@ -58,41 +56,37 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not tapped:
 		return
 
-	var world_pos := get_global_mouse_position()
+	var world_pos: Vector2 = get_global_mouse_position()
 
-	# 1. Якщо активний режим будівництва — ставимо об'єкт по сітці
 	if current_build_mode != BuildMode.NONE:
 		_try_place_building(world_pos)
 		return
 
-	# 2. Перевіряємо, чи натиснули на колоніста
-	var clicked_pawn := _find_colonist_near(world_pos)
+	var clicked_pawn: Node2D = _find_colonist_near(world_pos)
 	if clicked_pawn != null:
 		selected_colonist = clicked_pawn
 		status_label.text = "Вибрано: %s — тапніть по землі для руху" % clicked_pawn.name
 		return
 
-	# 3. Якщо колоніст вибраний — відправляємо його в точку дотику
 	if is_instance_valid(selected_colonist):
 		colonist_targets[selected_colonist] = world_pos
 		status_label.text = "%s прямує до точки..." % selected_colonist.name
 
 func _find_colonist_near(pos: Vector2) -> Node2D:
 	var best_pawn: Node2D = null
-	var best_dist := SELECT_RADIUS
+	var best_dist: float = SELECT_RADIUS
 
-	# Спочатку шукаємо у групі "colonists", якщо вона задана
 	var candidates: Array = get_tree().get_nodes_in_group("colonists")
 	if candidates.is_empty():
-		# Резервний пошук за іменами або вузлами Node2D на сцені
 		candidates = _collect_scene_pawns(get_tree().current_scene)
 
-	for node in candidates:
-		if node is Node2D and node != self:
-			var d := node.global_position.distance_to(pos)
+	for item in candidates:
+		if item is Node2D and item != self:
+			var pawn_node: Node2D = item as Node2D
+			var d: float = pawn_node.global_position.distance_to(pos)
 			if d <= best_dist:
 				best_dist = d
-				best_pawn = node
+				best_pawn = pawn_node
 	return best_pawn
 
 func _collect_scene_pawns(root: Node) -> Array:
@@ -106,15 +100,15 @@ func _collect_scene_pawns(root: Node) -> Array:
 	return result
 
 func _try_place_building(world_pos: Vector2) -> void:
-	var cell := Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
+	var cell: Vector2i = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
 	if placed_cells.has(cell):
 		status_label.text = "Ця клітинка вже зайнята"
 		return
 
-	var cost_wood := 0
-	var cost_steel := 0
-	var color := Color.WHITE
-	var title := ""
+	var cost_wood: int = 0
+	var cost_steel: int = 0
+	var color: Color = Color.WHITE
+	var title: String = ""
 
 	match current_build_mode:
 		BuildMode.WALL:
@@ -138,7 +132,7 @@ func _try_place_building(world_pos: Vector2) -> void:
 	wood -= cost_wood
 	steel -= cost_steel
 
-	var building := ColorRect.new()
+	var building: ColorRect = ColorRect.new()
 	building.size = Vector2(TILE_SIZE - 2.0, TILE_SIZE - 2.0)
 	building.position = Vector2(cell.x * TILE_SIZE + 1.0, cell.y * TILE_SIZE + 1.0)
 	building.color = color
@@ -164,11 +158,11 @@ func _create_selection_ring() -> void:
 	add_child(selection_ring)
 
 func _build_mobile_hud() -> void:
-	var layer := CanvasLayer.new()
+	var layer: CanvasLayer = CanvasLayer.new()
 	layer.layer = 10
 	add_child(layer)
 
-	var root_box := VBoxContainer.new()
+	var root_box: VBoxContainer = VBoxContainer.new()
 	root_box.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	root_box.offset_top = -126
 	root_box.offset_left = 12
@@ -183,11 +177,11 @@ func _build_mobile_hud() -> void:
 	status_label.add_theme_font_size_override("font_size", 18)
 	root_box.add_child(status_label)
 
-	var panel := PanelContainer.new()
+	var panel: PanelContainer = PanelContainer.new()
 	panel.custom_minimum_size = Vector2(0, 74)
 	root_box.add_child(panel)
 
-	var hbox := HBoxContainer.new()
+	var hbox: HBoxContainer = HBoxContainer.new()
 	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.add_theme_constant_override("separation", 10)
 	panel.add_child(hbox)
@@ -203,7 +197,7 @@ func _build_mobile_hud() -> void:
 	hbox.add_child(btn_cancel)
 
 func _make_hud_button(caption: String, on_click: Callable) -> Button:
-	var btn := Button.new()
+	var btn: Button = Button.new()
 	btn.text = caption
 	btn.custom_minimum_size = Vector2(155, 62)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
