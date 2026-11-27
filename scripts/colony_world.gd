@@ -174,8 +174,13 @@ func _process_wildlife(sim_delta: float) -> void:
 			var prefix: String = "[Ручний] " if tamed else ""
 			lbl.text = "%s%s" % [prefix, ("Кабан" if kind == "boar" else "Олень")]
 
+func _get_base_temp() -> int:
+	if GameState.selected_tile is Dictionary:
+		return int(GameState.selected_tile.get("temp", 18))
+	return int(round(float(GameState.get("selected_temp")))) if "selected_temp" in GameState else 18
+
 func _update_temperature() -> void:
-	var base_t: int = int(GameState.selected_tile.get("temp", 18))
+	var base_t: int = _get_base_temp()
 	var day_offset: int = -5 if (GameState.game_time_hours >= 22.0 or GameState.game_time_hours < 6.0) else 3
 	var weather_offset: int = 0
 	if GameState.active_weather_event == "Теплова хвиля":
@@ -386,12 +391,25 @@ func _get_hud() -> Node:
 	return hud
 
 func _generate_local_map() -> void:
-	var tile_info: Dictionary = GameState.selected_tile
-	var local_seed: int = GameState.planet_seed + int(tile_info.get("x", 0)) * 131 + int(tile_info.get("y", 0)) * 977
-	var rock_density: float = float(tile_info.get("rock_density", 0.22))
-	var tree_density: float = float(tile_info.get("tree_density", 0.16))
-	var biome: String = str(tile_info.get("biome", "Помірний ліс"))
+	var tx: int = 0
+	var ty: int = 0
+	var rock_density: float = 0.22
+	var tree_density: float = 0.16
+	var biome: String = str(GameState.get("selected_biome")) if "selected_biome" in GameState else "Помірний ліс"
 
+	if GameState.selected_tile is Dictionary:
+		var tile_info: Dictionary = GameState.selected_tile
+		tx = int(tile_info.get("x", 0))
+		ty = int(tile_info.get("y", 0))
+		rock_density = float(tile_info.get("rock_density", 0.22))
+		tree_density = float(tile_info.get("tree_density", 0.16))
+		biome = str(tile_info.get("biome", biome))
+	elif GameState.selected_tile is Vector2i:
+		var v: Vector2i = GameState.selected_tile
+		tx = v.x
+		ty = v.y
+
+	var local_seed: int = GameState.planet_seed + tx * 131 + ty * 977
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = local_seed
 
@@ -400,11 +418,11 @@ func _generate_local_map() -> void:
 	rock_noise.frequency = 0.085
 
 	var base_ground: Color = Color(0.20, 0.44, 0.18)
-	if biome == "Посушливі скелі":
+	if biome == "Посушливі скелі" or biome == "Пустеля":
 		base_ground = Color(0.62, 0.52, 0.30)
-	elif biome == "Холодна тайга":
+	elif biome == "Холодна тайга" or "Тундра" in biome:
 		base_ground = Color(0.36, 0.48, 0.44)
-	elif biome == "Скелясті гори":
+	elif biome == "Скелясті гори" or "Гори" in biome:
 		base_ground = Color(0.28, 0.36, 0.24)
 
 	var center_x: int = GRID_W / 2
@@ -519,26 +537,4 @@ func _create_colonist_pawn(p_name: String, pos: Vector2, saved_dict: Dictionary)
 	lbl.text = p_name
 	lbl.position = Vector2(-42, -52)
 	lbl.add_theme_font_size_override("font_size", 12)
-	pawn.add_child(lbl)
-
-	add_child(pawn)
-	colonists.append(pawn)
-
-func _build_top_bar() -> void:
-	var hud: CanvasLayer = CanvasLayer.new()
-	hud.layer = 12
-	add_child(hud)
-
-	var bar: PanelContainer = PanelContainer.new()
-	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	bar.custom_minimum_size = Vector2(0, 48)
-	hud.add_child(bar)
-
-	var hbox: HBoxContainer = HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 4)
-	bar.add_child(hbox)
-
-	top_status_lbl = Label.new()
-	top_status_lbl.text = " Д.1 08:00 | +18°C"
-	top_status_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top_status_lbl
+	
