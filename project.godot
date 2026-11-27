@@ -2,12 +2,14 @@
 config_version=5
 
 [application]
+
 config/name="RimWorld Colony"
-run/main_scene="res://scenes/Main.tscn"
+run/main_scene="res://scenes/MainMenu.tscn"
 config/features=PackedStringArray("4.2", "Mobile")
 
 [autoload]
 
+GameState="*res://scripts/game_state.gd"
 MobileHUD="*res://scripts/mobile_hud_controller.gd"
 
 [display]
