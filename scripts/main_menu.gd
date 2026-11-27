@@ -81,13 +81,14 @@ func _build_settings_panel() -> void:
 
 	var autosave_chk: CheckButton = CheckButton.new()
 	autosave_chk.text = "Автозбереження колонії"
-	autosave_chk.button_pressed = bool(GameState.settings["autosave"])
+	autosave_chk.button_pressed = bool(GameState.settings.get("autosave", true))
 	autosave_chk.add_theme_font_size_override("font_size", 20)
 	autosave_chk.toggled.connect(func(val: bool): GameState.settings["autosave"] = val)
 	box.add_child(autosave_chk)
 
 	var speed_label: Label = Label.new()
-	speed_label.text = "Швидкість перетягування камери: 1.0x"
+	var init_speed: float = float(GameState.settings.get("camera_speed", 1.0))
+	speed_label.text = "Швидкість перетягування камери: %.1fx" % init_speed
 	speed_label.add_theme_font_size_override("font_size", 18)
 	box.add_child(speed_label)
 
@@ -95,7 +96,7 @@ func _build_settings_panel() -> void:
 	speed_slider.min_value = 0.5
 	speed_slider.max_value = 2.0
 	speed_slider.step = 0.1
-	speed_slider.value = float(GameState.settings["camera_speed"])
+	speed_slider.value = init_speed
 	speed_slider.value_changed.connect(func(v: float):
 		GameState.settings["camera_speed"] = v
 		speed_label.text = "Швидкість перетягування камери: %.1fx" % v
@@ -135,10 +136,15 @@ func _build_planet_screen() -> void:
 	btn_regen.text = "Нова планета"
 	btn_regen.custom_minimum_size = Vector2(160, 48)
 	btn_regen.pressed.connect(func():
-		var new_seed: int = seed_input.text.hash() if not seed_input.text.is_valid_int() else int(seed_input.text)
-		if seed_input.text.strip_edges() == "":
+		var txt: String = seed_input.text.strip_edges()
+		var new_seed: int
+		if txt == "":
 			new_seed = randi() % 999999
 			seed_input.text = str(new_seed)
+		elif txt.is_valid_int():
+			new_seed = int(txt)
+		else:
+			new_seed = absi(txt.hash())
 		_generate_planet(new_seed)
 	)
 	top_bar.add_child(btn_regen)
@@ -280,51 +286,26 @@ func _generate_planet(seed_val: int) -> void:
 			}
 			row.append(cell_data)
 
-			var btn: Button = cell_buttons[Vector2i(x, y)]
-			btn.text = "▲" if biome == "Скелясті гори" else ""
-			_apply_cell_style(btn, color, false)
+			var btn: Button = cell_buttons.get(Vector2i(x, y)) as Button
+			if btn != null:
+				btn.text = "▲" if biome == "Скелясті гори" else ""
+				_apply_cell_style(btn, color, false)
 		planet_cells.append(row)
 
-	_select_planet_cell(selected_coords)
+	var safe_coords: Vector2i = Vector2i(
+		clampi(selected_coords.x, 0, MAP_COLS - 1),
+		clampi(selected_coords.y, 0, MAP_ROWS - 1)
+	)
+	_select_planet_cell(safe_coords)
 
 func _select_planet_cell(coords: Vector2i) -> void:
-	selected_coords = coords
-	var data: Dictionary = planet_cells[coords.y][coords.x]
-	for key in cell_buttons.keys():
-		var b: Button = cell_buttons[key]
-		var d: Dictionary = planet_cells[key.y][key.x]
-		_apply_cell_style(b, d["color"], key == coords)
-
-	GameState.selected_tile = data
-	var rock_pct: int = int(float(data["rock_density"]) * 100.0)
-	var tree_pct: int = int(float(data["tree_density"]) * 100.0)
-	info_label.text = "Координати [%d, %d] • %s • Скелі: %d%% • Дерева: %d%% • Темп: %d°C" % [
-		coords.x, coords.y, data["biome"], rock_pct, tree_pct, int(data["temp"])
-	]
-
-func _start_new_colony() -> void:
-	var data: Dictionary = GameState.selected_tile
-	if not bool(data.get("landable", true)):
-		info_label.text = "Неможливо висадитися в океан! Оберіть сушу або скелі."
+	if planet_cells.is_empty():
 		return
-	GameState.is_loading_save = false
-	get_tree().change_scene_to_file("res://scenes/Main.tscn")
-
-func _on_load_pressed() -> void:
-	if GameState.load_game():
-		get_tree().change_scene_to_file("res://scenes/Main.tscn")
-
-func _show_screen(screen_name: String) -> void:
-	menu_panel.visible = (screen_name == "menu")
-	settings_panel.visible = (screen_name == "settings")
-	planet_panel.visible = (screen_name == "planet")
-	if screen_name == "menu":
-		btn_load.disabled = not GameState.has_save()
-
-func _make_button(caption: String, callback: Callable) -> Button:
-	var btn: Button = Button.new()
-	btn.text = caption
-	btn.custom_minimum_size = Vector2(360, 64)
-	btn.add_theme_font_size_override("font_size", 22)
-	btn.pressed.connect(callback)
-	return btn
+	var safe_coords: Vector2i = Vector2i(
+		clampi(coords.x, 0, MAP_COLS - 1),
+		clampi(coords.y, 0, MAP_ROWS - 1)
+	)
+	selected_coords = safe_coords
+	var data: Dictionary = planet_cells[safe_coords.y][safe_coords.x]
+	for key in cell_buttons.keys():
+		var b: Button = cell_buttons[key] as Button
