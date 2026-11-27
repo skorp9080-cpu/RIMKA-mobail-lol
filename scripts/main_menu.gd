@@ -153,7 +153,6 @@ func _build_planet_screen() -> void:
 	)
 	top_bar.add_child(btn_rand)
 
-	# Карта планети по центру
 	var map_frame: CenterContainer = CenterContainer.new()
 	map_frame.set_anchors_preset(Control.PRESET_FULL_RECT)
 	map_frame.offset_top = 72
@@ -171,12 +170,13 @@ func _build_planet_screen() -> void:
 			var c_btn: Button = Button.new()
 			c_btn.custom_minimum_size = Vector2(36, 32)
 			c_btn.text = ""
+			c_btn.add_theme_color_override("font_color", Color(0.1, 0.1, 0.1))
+			c_btn.add_theme_font_size_override("font_size", 15)
 			var coords: Vector2i = Vector2i(x, y)
 			c_btn.pressed.connect(func(): _select_planet_cell(coords))
 			grid_container.add_child(c_btn)
 			cell_buttons[coords] = c_btn
 
-	# Нижня панель інформації про клітинку та старт
 	var bottom_bar: HBoxContainer = HBoxContainer.new()
 	bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom_bar.offset_left = 16
@@ -198,6 +198,24 @@ func _build_planet_screen() -> void:
 	btn_land.add_theme_font_size_override("font_size", 19)
 	btn_land.pressed.connect(func(): _start_new_colony())
 	bottom_bar.add_child(btn_land)
+
+func _apply_cell_style(btn: Button, bg_color: Color, is_selected: bool) -> void:
+	var sb: StyleBoxFlat = StyleBoxFlat.new()
+	sb.bg_color = bg_color
+	sb.corner_radius_top_left = 3
+	sb.corner_radius_top_right = 3
+	sb.corner_radius_bottom_left = 3
+	sb.corner_radius_bottom_right = 3
+	if is_selected:
+		sb.border_width_left = 3
+		sb.border_width_right = 3
+		sb.border_width_top = 3
+		sb.border_width_bottom = 3
+		sb.border_color = Color(1.0, 0.95, 0.15)
+	btn.add_theme_stylebox_override("normal", sb)
+	btn.add_theme_stylebox_override("hover", sb)
+	btn.add_theme_stylebox_override("pressed", sb)
+	btn.add_theme_stylebox_override("focus", sb)
 
 func _open_planet_generator() -> void:
 	_show_screen("planet")
@@ -222,30 +240,30 @@ func _generate_planet(seed_val: int) -> void:
 			var lat: float = absf(float(y) - float(MAP_ROWS) * 0.5) / (float(MAP_ROWS) * 0.5)
 
 			var biome: String = "Помірний ліс"
-			var color: Color = Color(0.24, 0.55, 0.26)
+			var color: Color = Color(0.22, 0.78, 0.30)
 			var rock_density: float = 0.15
 			var tree_density: float = 0.18
 			var temp: int = int(24.0 - lat * 28.0)
 
 			if h < -0.22:
 				biome = "Океан (недоступно)"
-				color = Color(0.12, 0.32, 0.65)
+				color = Color(0.14, 0.48, 0.95)
 				rock_density = 0.0
 				tree_density = 0.0
 			elif r > 0.65 or h > 0.35:
 				biome = "Скелясті гори"
-				color = Color(0.48, 0.46, 0.44)
+				color = Color(0.68, 0.65, 0.62)
 				rock_density = 0.38
 				tree_density = 0.06
 				temp -= 6
 			elif lat > 0.72:
 				biome = "Холодна тайга"
-				color = Color(0.55, 0.68, 0.65)
+				color = Color(0.75, 0.90, 0.88)
 				rock_density = 0.20
 				tree_density = 0.14
 			elif lat < 0.25 and h < 0.05:
 				biome = "Посушливі скелі"
-				color = Color(0.76, 0.64, 0.36)
+				color = Color(0.95, 0.78, 0.28)
 				rock_density = 0.28
 				tree_density = 0.03
 				temp += 8
@@ -263,8 +281,8 @@ func _generate_planet(seed_val: int) -> void:
 			row.append(cell_data)
 
 			var btn: Button = cell_buttons[Vector2i(x, y)]
-			btn.modulate = color
 			btn.text = "▲" if biome == "Скелясті гори" else ""
+			_apply_cell_style(btn, color, false)
 		planet_cells.append(row)
 
 	_select_planet_cell(selected_coords)
@@ -275,7 +293,7 @@ func _select_planet_cell(coords: Vector2i) -> void:
 	for key in cell_buttons.keys():
 		var b: Button = cell_buttons[key]
 		var d: Dictionary = planet_cells[key.y][key.x]
-		b.modulate = Color(1.0, 0.95, 0.3) if key == coords else d["color"]
+		_apply_cell_style(b, d["color"], key == coords)
 
 	GameState.selected_tile = data
 	var rock_pct: int = int(float(data["rock_density"]) * 100.0)
