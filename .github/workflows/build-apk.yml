@@ -23,7 +23,8 @@ jobs:
           TPL_ROOT="/root/.local/share/godot/export_templates/4.2.2.stable"
           TPL_GH="/github/home/.local/share/godot/export_templates/4.2.2.stable"
 
-          mkdir -p /root/.android /github/home/.android "$SDK_DIR" /root/.config/godot /github/home/.config/godot "$TPL_ROOT" "$TPL_GH" build/android
+          mkdir -p /root/.android /github/home/.android "$SDK_DIR" /root/.config/godot /github/home/.config/godot "$TPL_ROOT" "$TPL_GH" build/android .godot/editor
+          chmod -R 777 .godot
 
           if [ ! -f "$KEYSTORE_PATH" ]; then
             keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
@@ -113,7 +114,7 @@ jobs:
 
       - name: Export Debug APK
         run: |
-          mkdir -p build/android
+          mkdir -p build/android .godot/editor
           godot --headless --import || true
           godot --headless --export-debug "Android" build/android/RimWorldColony.apk
 
