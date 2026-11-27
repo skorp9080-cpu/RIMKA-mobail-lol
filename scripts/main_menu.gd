@@ -309,3 +309,44 @@ func _select_planet_cell(coords: Vector2i) -> void:
 	var data: Dictionary = planet_cells[safe_coords.y][safe_coords.x]
 	for key in cell_buttons.keys():
 		var b: Button = cell_buttons[key] as Button
+		var k: Vector2i = key as Vector2i
+		if b != null and k.y >= 0 and k.y < planet_cells.size() and k.x >= 0 and k.x < planet_cells[k.y].size():
+			var d: Dictionary = planet_cells[k.y][k.x]
+			_apply_cell_style(b, d["color"], k == safe_coords)
+
+	GameState.selected_tile = data
+	var rock_pct: int = int(float(data["rock_density"]) * 100.0)
+	var tree_pct: int = int(float(data["tree_density"]) * 100.0)
+	info_label.text = "Координати [%d, %d] • %s • Скелі: %d%% • Дерева: %d%% • Темп: %d°C" % [
+		safe_coords.x, safe_coords.y, data["biome"], rock_pct, tree_pct, int(data["temp"])
+	]
+
+func _start_new_colony() -> void:
+	var data: Dictionary = GameState.selected_tile
+	if not bool(data.get("landable", true)):
+		info_label.text = "Неможливо висадитися в океан! Оберіть сушу або скелі."
+		return
+	if GameState.has_method("reset_for_new_colony"):
+		GameState.call("reset_for_new_colony")
+	else:
+		GameState.is_loading_save = false
+	get_tree().change_scene_to_file("res://scenes/Main.tscn")
+
+func _on_load_pressed() -> void:
+	if GameState.load_game():
+		get_tree().change_scene_to_file("res://scenes/Main.tscn")
+
+func _show_screen(screen_name: String) -> void:
+	menu_panel.visible = (screen_name == "menu")
+	settings_panel.visible = (screen_name == "settings")
+	planet_panel.visible = (screen_name == "planet")
+	if screen_name == "menu":
+		btn_load.disabled = not GameState.has_save()
+
+func _make_button(caption: String, callback: Callable) -> Button:
+	var btn: Button = Button.new()
+	btn.text = caption
+	btn.custom_minimum_size = Vector2(360, 64)
+	btn.add_theme_font_size_override("font_size", 22)
+	btn.pressed.connect(callback)
+	return btn
