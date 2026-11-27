@@ -176,6 +176,11 @@ func grant_drop_pod() -> void:
 	_refresh_resource_bar()
 	notify_event("Подія: Вантажні капсули! (+60 дер, +45 сталі, +35 їжі, +4 мед, +2 комп)")
 
+func grant_meteor_loot() -> void:
+	steel += 40
+	components += 2
+	_refresh_resource_bar()
+
 func enable_trader() -> void:
 	trader_available = true
 	notify_event("Подія: Прибув торговий караван! Відкрийте вкладку «Крафт/Торг»")
@@ -188,6 +193,20 @@ func reward_raid_victory() -> void:
 	components += 1
 	_refresh_resource_bar()
 	notify_event("Рейдера переможено! Трофеї: +25 сталі, +2 мед., +1 комп.")
+
+func _spawn_tracer_line(from_pos: Vector2, to_pos: Vector2, col: Color) -> void:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	var line: Line2D = Line2D.new()
+	line.points = PackedVector2Array([from_pos, to_pos])
+	line.width = 2.0
+	line.default_color = col
+	line.z_index = 30
+	scene.add_child(line)
+	var tw: Tween = create_tween()
+	tw.tween_property(line, "modulate:a", 0.0, 0.18)
+	tw.tween_callback(line.queue_free)
 
 func _physics_process(delta: float) -> void:
 	var in_colony: bool = _is_colony_scene()
@@ -270,6 +289,7 @@ func _update_power_and_turrets(sim_delta: float) -> void:
 						if enemy != null and is_instance_valid(enemy) and t_pos.distance_to(enemy.global_position) <= 260.0:
 							var e_hp: float = float(enemy.get_meta("hp", 100.0)) - 22.0
 							enemy.set_meta("hp", e_hp)
+							_spawn_tracer_line(t_pos, enemy.global_position, Color(1.0, 0.85, 0.25))
 							break
 
 func _update_research(sim_delta: float) -> void:
@@ -296,6 +316,15 @@ func _update_research(sim_delta: float) -> void:
 				if current_category == "research" or current_category == "gear" or current_category == "power" or current_category == "farm":
 					_rebuild_item_buttons()
 			break
+
+func _has_med_bed_near(pos: Vector2) -> bool:
+	for cell_key in placed_cells.keys():
+		var node: Control = placed_cells[cell_key] as Control
+		if node != null and is_instance_valid(node) and str(node.get_meta("build_id", "")) == "med_bed":
+			var center: Vector2 = node.position + node.size * 0.5
+			if pos.distance_to(center) <= 48.0:
+				return true
+	return false
 
 func _update_colonist_simulation(sim_delta: float) -> void:
 	var all_pawns: Array = _get_all_colonists()
@@ -326,7 +355,8 @@ func _update_colonist_simulation(sim_delta: float) -> void:
 				pawn.global_position += (bed_pos - pawn.global_position).normalized() * 90.0 * sim_delta
 			else:
 				energy = minf(100.0, energy + sim_delta * 9.0)
-				hp = minf(100.0, hp + sim_delta * 1.5)
+				var heal_mult: float = 2.5 if _has_med_bed_near(pawn.global_position) else 1.0
+				hp = minf(100.0, hp + sim_delta * 1.5 * heal_mult)
 		else:
 			energy = maxf(0.0, energy - sim_delta * 0.48)
 
@@ -494,31 +524,4 @@ func _finish_work_order(order: Dictionary) -> void:
 			notify_event("Скелю видобуто (+20 кам., +15 сталі)")
 		"order_harvest":
 			var gain: int = 12
-			if target_node != null and is_instance_valid(target_node):
-				if target_node.name.begins_with("Berry_"):
-					gain = 16
-				target_node.queue_free()
-			food += gain
-			notify_event("Зібрано лісовий врожай (+%d їжі)" % gain)
-		"order_hunt":
-			if target_node != null and is_instance_valid(target_node):
-				var kind: String = str(target_node.get_meta("kind", "deer"))
-				var meat: int = 35 if kind == "boar" else 28
-				food += meat
-				target_node.queue_free()
-				notify_event("Успішне полювання! Добуто +%d їжі" % meat)
-		"order_tame":
-			if target_node != null and is_instance_valid(target_node):
-				target_node.set_meta("tamed", true)
-				notify_event("Тварину приручено! Тепер вона допомагає колонії")
-		"order_deconstruct":
-			if placed_cells.has(cell):
-				var b_node: Node = placed_cells[cell] as Node
-				var b_id: String = str(b_node.get_meta("build_id", ""))
-				_refund_resources(b_id)
-				b_node.queue_free()
-				placed_cells.erase(cell)
-			elif placed_floors.has(cell):
-				var f_node: Node = placed_floors[cell] as Node
-				var f_id: String = str(f_node.get_meta("build_id", ""))
-				_refund_resources(
+			if target_node != null and is_instance_valid
