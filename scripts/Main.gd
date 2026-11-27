@@ -755,3 +755,20 @@ func _apply_colony_tool_at(world_p: Vector2) -> void:
 
 	_update_hud()
 	colony_canvas.queue_redraw()
+func _refresh_pawn_card() -> void:
+	if pawn_card_label == null or work_vbox == null:
+		return
+	for ch in work_vbox.get_children():
+		ch.queue_free()
+	if pawns.is_empty():
+		pawn_card_label.text = "Колоністів немає"
+		return
+	if selected_pawn_idx < 0 or selected_pawn_idx >= pawns.size():
+		selected_pawn_idx = 0
+	var p: Dictionary = pawns[selected_pawn_idx]
+	pawn_card_label.text = "%s\nРиса: %s\nЗадача: %s\nНастрій: %.0f%% | Їжа: %.0f%%" % [
+		p["name"], p["trait"], p["task_name"], p["mood"], p["hunger"]
+	]
+	var lbl := Label.new()
+	lbl.text = "Інструмент: " + active_tool
+	work_vbox.add_child(lbl)
