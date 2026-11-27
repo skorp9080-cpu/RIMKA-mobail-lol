@@ -8,6 +8,7 @@ config/features=PackedStringArray("4.2", "Mobile")
 
 [autoload]
 GameState="*res://scripts/GameState.gd"
+MobileHUD="*res://mobile_hud_controller.gd
 
 [display]
 window/size/viewport_width=1280
