@@ -689,3 +689,69 @@ func _on_colony_input(event: InputEvent) -> void:
 		cam_pos.y = clampf(cam_pos.y, 0.0, MAP_H * TILE_SIZE)
 		last_drag_pos = event.position
 		colony_canvas.queue_redraw()
+func _update_hud() -> void:
+	if state != ScreenState.COLONY or top_res_label == null:
+		return
+	top_res_label.text = "🌲 %d  ⚙️ %d  🍖 %d  💊 %d" % [
+		resources.get("wood", 0),
+		resources.get("steel", 0),
+		resources.get("food", 0),
+		resources.get("medicine", 0)
+	]
+	var hr := int(game_hours) % 24
+	var mn := int((game_hours - floor(game_hours)) * 60.0)
+	time_label.text = "День %d  %02d:%02d" % [day_count, hr, mn]
+	randy_label.text = "%s (%.0fs)" % [GameState.storyteller, maxf(0.0, randy_timer)]
+
+func _add_letter(text: String) -> void:
+	if letter_box == null:
+		return
+	var l := Label.new()
+	l.text = "📩 " + text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD
+	l.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
+	letter_box.add_child(l)
+	if letter_box.get_child_count() > 4:
+		letter_box.get_child(0).queue_free()
+
+func _apply_colony_tool_at(world_p: Vector2) -> void:
+	var gx := int(world_p.x / TILE_SIZE)
+	var gy := int(world_p.y / TILE_SIZE)
+	if gx < 0 or gy < 0 or gx >= MAP_W or gy >= MAP_H:
+		return
+
+	for i in range(pawns.size()):
+		if pawns[i]["pos"].distance_to(world_p) <= TILE_SIZE * 0.65:
+			selected_pawn_idx = i
+			_refresh_pawn_card()
+			colony_canvas.queue_redraw()
+			return
+
+	match active_tool:
+		"mine":
+			if object_grid[gy][gx] in [1, 2]:
+				designation_grid[gy][gx] = 1
+		"chop":
+			if object_grid[gy][gx] == 3:
+				designation_grid[gy][gx] = 2
+		"wall":
+			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 5:
+				resources["wood"] -= 5
+				object_grid[gy][gx] = 5
+		"door":
+			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 10:
+				resources["wood"] -= 10
+				object_grid[gy][gx] = 6
+		"bed":
+			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 25:
+				resources["wood"] -= 25
+				object_grid[gy][gx] = 7
+		"campfire":
+			if object_grid[gy][gx] == 0 and resources.get("wood", 0) >= 15:
+				resources["wood"] -= 15
+				object_grid[gy][gx] = 8
+		"stockpile":
+			stockpile_grid[gy][gx] = not stockpile_grid[gy][gx]
+
+	_update_hud()
+	colony_canvas.queue_redraw()
