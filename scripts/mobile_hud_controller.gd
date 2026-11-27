@@ -13,6 +13,7 @@ var placed_cells: Dictionary = {}
 var wood: int = 200
 var steel: int = 140
 
+var hud_layer: CanvasLayer
 var selection_ring: Line2D
 var status_label: Label
 var btn_wall: Button
@@ -25,7 +26,20 @@ func _ready() -> void:
 	_build_mobile_hud()
 	_refresh_buttons()
 
+func _is_colony_scene() -> bool:
+	var scene: Node = get_tree().current_scene
+	return scene != null and scene.name == "Main"
+
 func _physics_process(delta: float) -> void:
+	var in_colony: bool = _is_colony_scene()
+	if hud_layer != null:
+		hud_layer.visible = in_colony
+
+	if not in_colony:
+		if selection_ring != null:
+			selection_ring.visible = false
+		return
+
 	for pawn in colonist_targets.keys():
 		if not is_instance_valid(pawn):
 			colonist_targets.erase(pawn)
@@ -47,6 +61,9 @@ func _physics_process(delta: float) -> void:
 		selection_ring.visible = false
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not _is_colony_scene():
+		return
+
 	var tapped: bool = false
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		tapped = true
@@ -158,9 +175,10 @@ func _create_selection_ring() -> void:
 	add_child(selection_ring)
 
 func _build_mobile_hud() -> void:
-	var layer: CanvasLayer = CanvasLayer.new()
-	layer.layer = 10
-	add_child(layer)
+	hud_layer = CanvasLayer.new()
+	hud_layer.layer = 10
+	hud_layer.visible = false
+	add_child(hud_layer)
 
 	var root_box: VBoxContainer = VBoxContainer.new()
 	root_box.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -169,7 +187,7 @@ func _build_mobile_hud() -> void:
 	root_box.offset_right = -12
 	root_box.offset_bottom = -10
 	root_box.add_theme_constant_override("separation", 6)
-	layer.add_child(root_box)
+	hud_layer.add_child(root_box)
 
 	status_label = Label.new()
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
