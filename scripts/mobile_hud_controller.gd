@@ -44,6 +44,7 @@ var build_catalog: Dictionary = {
 	"orders": [
 		{"id": "order_chop", "name": "Рубати дерево", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
 		{"id": "order_mine", "name": "Копати скелю", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
+		{"id": "order_harvest", "name": "Збирати їжу", "wood": 0, "steel": 0, "stone": 0, "is_order": true},
 		{"id": "order_deconstruct", "name": "Розібрати", "wood": 0, "steel": 0, "stone": 0, "is_order": true}
 	],
 	"farm": [
@@ -233,7 +234,7 @@ func _process_work_orders(sim_delta: float) -> void:
 			worker.global_position += diff.normalized() * 105.0 * sim_delta
 		else:
 			var o_type: String = str(order["type"])
-			var speed: float = 0.55 if o_type == "order_chop" else (0.38 if o_type == "order_mine" else 0.70)
+			var speed: float = 0.55 if o_type == "order_chop" else (0.38 if o_type == "order_mine" else 0.75)
 			var prog: float = float(order.get("progress", 0.0)) + sim_delta * speed
 			order["progress"] = prog
 			var bar_fill: ColorRect = order.get("bar_fill", null) as ColorRect
@@ -271,6 +272,14 @@ func _finish_work_order(order: Dictionary) -> void:
 			stone += 20
 			steel += 15
 			status_label.text = "Скелю видобуто (+20 кам., +15 сталі)"
+		"order_harvest":
+			var gain: int = 12
+			if target_node != null and is_instance_valid(target_node):
+				if target_node.name.begins_with("Berry_"):
+					gain = 16
+				target_node.queue_free()
+			food += gain
+			status_label.text = "Зібрано лісовий врожай (+%d їжі)" % gain
 		"order_deconstruct":
 			if placed_cells.has(cell):
 				var b_node: Node = placed_cells[cell] as Node
@@ -344,7 +353,7 @@ func _try_assign_order(world_pos: Vector2) -> void:
 	if selected_build_id == "order_chop":
 		var tree_node: Control = _find_map_object_at_cell(scene, cell, "tree")
 		if tree_node == null:
-			status_label.text = "Тут немає дерева! Тапніть по зеленому дереву"
+			status_label.text = "Тут немає дерева! Тапніть по дереву"
 			return
 		var marker_data: Dictionary = _create_order_marker(cell, "order_chop")
 		work_orders.append({
@@ -379,6 +388,24 @@ func _try_assign_order(world_pos: Vector2) -> void:
 		})
 		status_label.text = "Наказ: копати скелю (у черзі: %d)" % work_orders.size()
 
+	elif selected_build_id == "order_harvest":
+		var forage_node: Control = _find_map_object_at_cell(scene, cell, "forage")
+		if forage_node == null:
+			status_label.text = "Тут немає ягід чи грибів!"
+			return
+		var marker_data: Dictionary = _create_order_marker(cell, "order_harvest")
+		work_orders.append({
+			"type": "order_harvest",
+			"cell": cell,
+			"world_pos": cell_center,
+			"target_node": forage_node,
+			"marker": marker_data["root"],
+			"bar_fill": marker_data["fill"],
+			"worker": null,
+			"progress": 0.0
+		})
+		status_label.text = "Наказ: зібрати ягоди/гриби (у черзі: %d)" % work_orders.size()
+
 	elif selected_build_id == "order_deconstruct":
 		if not placed_cells.has(cell) and not placed_floors.has(cell):
 			status_label.text = "Тут немає збудованого об'єкта"
@@ -401,11 +428,13 @@ func _find_map_object_at_cell(root: Node, cell: Vector2i, kind: String) -> Contr
 	var children: Array = root.get_children()
 	for i: int in range(children.size()):
 		var child: Node = children[i]
-		if child is ColorRect:
-			var cr: ColorRect = child as ColorRect
+		if child is Control:
+			var cr: Control = child as Control
 			if not cell_rect.has_point(cr.position + cr.size * 0.5):
 				continue
-			if kind == "tree" and cr.size.x < 24.0:
+			if kind == "tree" and cr.name.begins_with("Tree_"):
+				return cr
+			elif kind == "forage" and (cr.name.begins_with("Berry_") or cr.name.begins_with("Mushroom_")):
 				return cr
 			elif kind == "rock" and cr.name.begins_with("Rock_"):
 				return cr
@@ -528,34 +557,4 @@ func _spawn_building_block(cell: Vector2i, build_id: String, is_floor: bool) -> 
 		block.z_index = 2
 		placed_cells[cell] = block
 		if build_id == "farm_potato":
-			crop_plots.append({"cell": cell, "node": block, "growth": 0.0})
-
-	get_tree().current_scene.add_child(block)
-
-func export_save_state() -> Dictionary:
-	var saved_buildings: Array = []
-	for cell_key in placed_cells.keys():
-		var c: Vector2i = cell_key as Vector2i
-		var node: Control = placed_cells[cell_key] as Control
-		if node != null and is_instance_valid(node):
-			saved_buildings.append({"x": c.x, "y": c.y, "id": str(node.get_meta("build_id", "")), "floor": false})
-	for floor_key in placed_floors.keys():
-		var fc: Vector2i = floor_key as Vector2i
-		var fnode: Control = placed_floors[floor_key] as Control
-		if fnode != null and is_instance_valid(fnode):
-			saved_buildings.append({"x": fc.x, "y": fc.y, "id": str(fnode.get_meta("build_id", "")), "floor": true})
-	return {
-		"wood": wood,
-		"steel": steel,
-		"stone": stone,
-		"food": food,
-		"buildings": saved_buildings
-	}
-
-func import_save_state(state: Dictionary) -> void:
-	if state.is_empty():
-		return
-	wood = int(state.get("wood", 200))
-	steel = int(state.get("steel", 140))
-	stone = int(state.get("stone", 120))
-	food = int(state.get("food", 8
+			crop_plo
